@@ -349,6 +349,28 @@ static bool bin_has(const char* name)
     return false;
 }
 
+static void print_long_entry(bool is_dir, bool writable, bool hidden_name,
+    bool hidden_attr, bool system, bool archive, uint32_t size,
+    const char* date, const std::string& name)
+{
+    const char type = is_dir ? 'd' : '-';
+    const char perm_r = 'r';
+    const char perm_w = writable ? 'w' : '-';
+    const char perm_h = hidden_attr ? 'H' : (hidden_name ? 'h' : '-');
+    const char perm_s = system ? 's' : '-';
+    const char perm_a = archive ? 'a' : '-';
+
+    char size_str[8];
+    format_size(size, size_str, sizeof(size_str));
+
+    char line[96];
+    snprintf(line, sizeof(line), "%c%c%c%c%c%c %4s %s %s",
+        type, perm_r, perm_w, perm_h, perm_s, perm_a,
+        size_str, date, name.c_str());
+    term_puts(line);
+    term_putc('\n');
+}
+
 static void list_bin_entries(std::vector<FsEntry>& out, bool include_hidden)
 {
     for (size_t i = 0; i < sizeof(k_bin_names) / sizeof(k_bin_names[0]); i++) {
@@ -376,18 +398,11 @@ static void list_bin(const char* opts)
     std::vector<FsEntry> entries;
     list_bin_entries(entries, opt_all);
 
-    char line[96];
-    const char* size_str = "0";
     for (const auto& e : entries) {
         if (opt_long) {
-            const char perm_r = 'r';
-            const char perm_h = (opt_all && e.name[0] == '.') ? 'h' : '-';
-            const char perm_s = 's';
-            const char perm_a = '-';
-            snprintf(line, sizeof(line), "-%c%c%c%c %4s %s %s",
-                perm_r, perm_h, perm_s, perm_a, size_str, date, e.name.c_str());
-            term_puts(line);
-            term_putc('\n');
+            const bool hidden_by_name = !e.name.empty() && e.name[0] == '.';
+            print_long_entry(false, false, hidden_by_name, false, true, false,
+                0, date, e.name);
         } else {
             term_puts(e.name.c_str());
             term_putc('\n');
@@ -403,6 +418,7 @@ struct ls_entry {
     uint8_t fat_attr;
     bool fat_valid;
 };
+
 
 static bool list_sd_dir(const char* real_path, const char* opts)
 {
@@ -467,20 +483,14 @@ static bool list_sd_dir(const char* real_path, const char* opts)
         std::reverse(entries.begin(), entries.end());
     }
 
-    char line[96];
-    char size_str[8];
     for (const auto& e : entries) {
         if (opt_long) {
-            const char type = e.is_dir ? 'd' : '-';
             const bool hidden_by_name = !e.name.empty() && e.name[0] == '.';
             const bool hidden_by_attr = e.fat_valid && (e.fat_attr & AM_HID);
             const bool read_only = e.fat_valid && (e.fat_attr & AM_RDO);
             const bool archive = e.fat_valid && (e.fat_attr & AM_ARC);
+            const bool system = e.fat_valid && (e.fat_attr & AM_SYS);
             const bool hidden = hidden_by_name || hidden_by_attr;
-            const char perm_r = 'r';
-            const char perm_w = read_only ? '-' : 'w';
-            const char perm_h = hidden_by_attr ? 'H' : (hidden_by_name ? 'h' : '-');
-            const char perm_a = archive ? 'a' : '-';
 
             char date[16] = "1970-01-01";
             time_t tt = (time_t)e.mtime;
@@ -493,12 +503,8 @@ static bool list_sd_dir(const char* real_path, const char* opts)
                     tm_ptr->tm_mday);
             }
 
-            format_size(e.size, size_str, sizeof(size_str));
-            snprintf(line, sizeof(line), "%c%c%c%c%c %4s %s %s",
-                type, perm_r, perm_w, perm_h, perm_a,
-                size_str, date, e.name.c_str());
-            term_puts(line);
-            term_putc('\n');
+            print_long_entry(e.is_dir, !read_only, hidden_by_name,
+                hidden_by_attr, system, archive, e.size, date, e.name);
         } else {
             term_puts(e.name.c_str());
             term_putc('\n');
@@ -553,10 +559,17 @@ bool fs_list(const char* path, const char* opts)
 {
     char canon[128];
     fs_norm(cwd, path, canon, sizeof(canon));
+    bool opt_long = opts && strchr(opts, 'l');
 
     if (path_eq(canon, "/")) {
-        term_puts("bin\n");
-        term_puts("media\n");
+        if (opt_long) {
+            const char* date = "1970-01-01";
+            print_long_entry(true, true, false, false, true, false, 0, date, "bin");
+            print_long_entry(true, true, false, false, true, false, 0, date, "media");
+        } else {
+            term_puts("bin\n");
+            term_puts("media\n");
+        }
         return true;
     }
 
@@ -566,8 +579,14 @@ bool fs_list(const char* path, const char* opts)
     }
 
     if (path_eq(canon, "/media")) {
-        if (sd_is_mounted())
-            term_puts("0\n");
+        if (sd_is_mounted()) {
+            if (opt_long) {
+                const char* date = "1970-01-01";
+                print_long_entry(true, true, false, false, true, false, 0, date, "0");
+            } else {
+                term_puts("0\n");
+            }
+        }
         return true;
     }
 

@@ -89,7 +89,21 @@ static std::string man_entry(const char* name)
          "  -a   include hidden entries\n"
          "  -l   long format\n"
          "  -t   sort by time\n"
-         "  -r   reverse sort\n"},
+         "  -r   reverse sort\n"
+         "\n"
+         "LONG FORMAT\n"
+         "  Example: ls -la\n"
+         "  drw-s-  512 2024-01-01 /media/0\n"
+         "  -rwh-- 1024 2024-01-01 hello.txt\n"
+         "\n"
+         "  d / -  directory or file\n"
+         "  r/w    readable / writable\n"
+         "  h      hidden by name (starts with '.')\n"
+         "  H      hidden by FAT attribute\n"
+         "  s      system flag (FAT32; virtual entries)\n"
+         "  a      archive flag (FAT32)\n"
+         "  size   file size (bytes have no suffix, otherwise K/M/G)\n"
+         "  date   file date\n"},
         {"pwd",
          "NAME\n"
          "  pwd - print working directory\n"
@@ -163,13 +177,30 @@ static std::string man_entry(const char* name)
          "SYNOPSIS\n"
          "  lx <path>\n"
          "  lx --profile <safe|balanced|power> <path>\n"
-         "  lx -p <safe|balanced|power> <path>\n"},
+         "  lx -p <safe|balanced|power> <path>\n"
+         "\n"
+         "PROFILES\n"
+         "  safe     - highest reserve, most conservative\n"
+         "  balanced - default reserve, good for most scripts\n"
+         "  power    - lowest reserve, maximum capacity (higher OOM risk)\n"
+         "\n"
+         "NOTES\n"
+         "  The default profile lives in RAM only and resets to balanced on reboot.\n"
+         "  Using --profile changes the profile for that run only.\n"},
         {"lxprofile",
          "NAME\n"
          "  lxprofile - set default Lx execution profile\n"
          "\n"
          "SYNOPSIS\n"
-         "  lxprofile [safe|balanced|power]\n"},
+         "  lxprofile [safe|balanced|power]\n"
+         "\n"
+         "PROFILES\n"
+         "  safe     - highest reserve, most conservative\n"
+         "  balanced - default reserve, good for most scripts\n"
+         "  power    - lowest reserve, maximum capacity (higher OOM risk)\n"
+         "\n"
+         "NOTES\n"
+         "  The default profile lives in RAM only and resets to balanced on reboot.\n"},
         {"more",
          "NAME\n"
          "  more - page through text\n"
