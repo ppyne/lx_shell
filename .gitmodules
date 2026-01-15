@@ -1,0 +1,3 @@
+[submodule "lib/lx"]
+	path = lib/lx
+	url = https://github.com/ppyne/lx.git

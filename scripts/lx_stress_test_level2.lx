@@ -1,0 +1,94 @@
+print("LX stress test level 2 begin", LX_EOL);
+
+// Prime sieve (heavier)
+$N = 10000;
+$prime = [];
+for ($i = 0; $i <= $N; $i++) { $prime[$i] = 1; }
+$prime[0] = 0;
+$prime[1] = 0;
+for ($p = 2; $p * $p <= $N; $p++) {
+    if ($prime[$p]) {
+        for ($k = $p * $p; $k <= $N; $k += $p) {
+            $prime[$k] = 0;
+        }
+    }
+}
+$sum = 0;
+$count = 0;
+$last = 2;
+$max_gap = 0;
+for ($i = 2; $i <= $N; $i++) {
+    if ($prime[$i]) {
+        $count = $count + 1;
+        $sum = $sum + $i;
+        $gap = $i - $last;
+        if ($gap > $max_gap) { $max_gap = $gap; }
+        $last = $i;
+    }
+}
+print("primes up to ", $N, ": ", $count, " sum=", $sum, " max_gap=", $max_gap, LX_EOL);
+
+// Matrix multiply checksum (heavier)
+$size = 40;
+$a = [];
+$b = [];
+$c = [];
+for ($i = 0; $i < $size; $i++) {
+    $a[$i] = [];
+    $b[$i] = [];
+    $c[$i] = [];
+    for ($j = 0; $j < $size; $j++) {
+        $a[$i][$j] = ($i * 3 + $j * 7 + 1) % 97;
+        $b[$i][$j] = ($i * 5 + $j * 11 + 2) % 89;
+    }
+}
+$checksum = 0;
+for ($i = 0; $i < $size; $i++) {
+    for ($j = 0; $j < $size; $j++) {
+        $acc = 0;
+        for ($k = 0; $k < $size; $k++) {
+            $acc = $acc + ($a[$i][$k] * $b[$k][$j]);
+        }
+        $c[$i][$j] = $acc;
+        $checksum = $checksum + $acc;
+    }
+}
+print("matrix ", $size, "x", $size, " checksum=", $checksum, LX_EOL);
+
+// Function calls without recursion (heavier)
+function fib_iter($n) {
+    $a = 0;
+    $b = 1;
+    for ($i = 0; $i < $n; $i++) {
+        $t = $a + $b;
+        $a = $b;
+        $b = $t;
+    }
+    return $a;
+}
+function mix($x) {
+    $v = $x;
+    for ($i = 0; $i < 2000; $i++) {
+        $v = ($v * 33 + $i) % 65521;
+    }
+    return $v;
+}
+$f = fib_iter(40);
+$m = mix(12345);
+print("fib_iter(40)=", $f, " mix=", $m, LX_EOL);
+
+// String building and simple map
+$text = "";
+for ($i = 0; $i < 300; $i++) {
+    $text = $text . chr(65 + ($i % 26));
+}
+$map = ["alpha" => 1, "beta" => 2];
+$map["gamma"] = 3;
+$map["delta"] = 4;
+$sum2 = 0;
+foreach ($map as $k => $v) {
+    $sum2 = $sum2 + $v;
+}
+print("text len=", strlen($text), " map sum=", $sum2, LX_EOL);
+
+print("LX stress test level 2 end", LX_EOL);

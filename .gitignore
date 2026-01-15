@@ -1,0 +1,11 @@
+.DS_Store
+.pio/
+.pioenvs/
+.piolibdeps/
+.vscode/
+.idea/
+*.log
+*.tmp
+*.bak
+*~
+scripts/output.txt

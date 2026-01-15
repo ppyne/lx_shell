@@ -1,0 +1,218 @@
+#include "lx_runner.h"
+
+#include <stddef.h>
+#include <stdio.h>
+#include <string>
+#include <string.h>
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include <Arduino.h>
+
+#include "fs/fs.h"
+#include "ui/terminal.h"
+#include "lxsh_fs_bridge.h"
+
+extern "C" {
+#include "env.h"
+#include "eval.h"
+#include "lexer.h"
+#include "lx_error.h"
+#include "natives.h"
+#include "parser.h"
+#include "lx_ext.h"
+#include "ext_lxshfs.h"
+#include "memguard.h"
+}
+
+static void lx_output_cb(const char* data, size_t len)
+{
+    if (!data || len == 0) {
+        return;
+    }
+    for (size_t i = 0; i < len; ++i) {
+        term_putc(data[i]);
+    }
+}
+
+static void lx_report_error()
+{
+    const LxError* err = lx_get_error();
+    if (!err) {
+        term_error("lx error");
+        return;
+    }
+
+    char buf[192];
+    if (err->line > 0) {
+        snprintf(buf, sizeof(buf), "%s (%d:%d)",
+            err->message, err->line, err->col);
+    } else {
+        snprintf(buf, sizeof(buf), "%s", err->message);
+    }
+    term_error(buf);
+}
+
+enum LxProfile {
+    LX_PROFILE_SAFE = 0,
+    LX_PROFILE_BALANCED,
+    LX_PROFILE_POWER
+};
+
+static LxProfile g_lx_profile = LX_PROFILE_BALANCED;
+
+static void lx_apply_profile()
+{
+    size_t reserve = 0;
+    switch (g_lx_profile) {
+        case LX_PROFILE_SAFE:
+            reserve = 120 * 1024;
+            break;
+        case LX_PROFILE_POWER:
+            reserve = 40 * 1024;
+            break;
+        case LX_PROFILE_BALANCED:
+        default:
+            reserve = 80 * 1024;
+            break;
+    }
+    lx_set_mem_reserve(reserve);
+}
+
+extern "C" size_t lx_platform_free_heap(void)
+{
+    return ESP.getFreeHeap();
+}
+
+bool lx_set_profile(const char* name)
+{
+    if (!name || !*name) {
+        return false;
+    }
+    if (strcmp(name, "safe") == 0) {
+        g_lx_profile = LX_PROFILE_SAFE;
+    } else if (strcmp(name, "balanced") == 0) {
+        g_lx_profile = LX_PROFILE_BALANCED;
+    } else if (strcmp(name, "power") == 0) {
+        g_lx_profile = LX_PROFILE_POWER;
+    } else {
+        return false;
+    }
+    return true;
+}
+
+const char* lx_get_profile_name()
+{
+    switch (g_lx_profile) {
+        case LX_PROFILE_SAFE: return "safe";
+        case LX_PROFILE_POWER: return "power";
+        case LX_PROFILE_BALANCED:
+        default:
+            return "balanced";
+    }
+}
+
+static bool lx_run_script_internal(const char* path)
+{
+    if (!path || !*path) {
+        term_error("missing operand");
+        return false;
+    }
+
+    std::string source;
+    if (!fs_read_file(path, source)) {
+        term_error("cannot read");
+        return false;
+    }
+
+    lx_apply_profile();
+    lx_set_output_cb(lx_output_cb);
+    lx_error_clear();
+
+    Parser parser;
+    lexer_init(&parser.lexer, source.c_str(), path);
+    parser.current.type = TOK_ERROR;
+    parser.previous.type = TOK_ERROR;
+
+    AstNode* program = parse_program(&parser);
+    if (!program || lx_has_error()) {
+        lx_report_error();
+        return false;
+    }
+
+    Env* global = env_new(NULL);
+    install_stdlib();
+
+    lxsh_fs_register();
+#if defined(LX_TARGET_LXSH) && LX_TARGET_LXSH
+    register_lxshfs_module();
+#endif
+    lx_init_modules(global);
+
+    EvalResult r = eval_program(program, global);
+    (void)r;
+
+    if (lx_has_error()) {
+        lx_report_error();
+        return false;
+    }
+
+    return true;
+}
+
+struct LxTaskArgs {
+    std::string path;
+    TaskHandle_t caller;
+    bool result;
+};
+
+static TaskHandle_t g_lx_task_handle = NULL;
+
+static void lx_task_entry(void* pv)
+{
+    LxTaskArgs* args = static_cast<LxTaskArgs*>(pv);
+    args->result = lx_run_script_internal(args->path.c_str());
+    g_lx_task_handle = NULL;
+    xTaskNotifyGive(args->caller);
+    vTaskDelete(NULL);
+}
+
+bool lx_run_script(const char* path)
+{
+    if (g_lx_task_handle) {
+        term_error("lx task busy");
+        return false;
+    }
+
+    LxTaskArgs* args = new LxTaskArgs{std::string(path ? path : ""), xTaskGetCurrentTaskHandle(), false};
+    if (!args) {
+        term_error("no memory");
+        return false;
+    }
+
+    uint32_t stack_size = 0;
+#ifdef LX_TASK_STACK_SIZE
+    stack_size = LX_TASK_STACK_SIZE;
+#else
+    stack_size = 32768;
+#endif
+
+    BaseType_t ok = xTaskCreatePinnedToCore(
+        lx_task_entry,
+        "lx_task",
+        stack_size,
+        args,
+        1,
+        &g_lx_task_handle,
+        tskNO_AFFINITY);
+    if (ok != pdPASS) {
+        delete args;
+        term_error("lx task failed");
+        return false;
+    }
+
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    bool result = args->result;
+    delete args;
+    return result;
+}
