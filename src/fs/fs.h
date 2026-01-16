@@ -34,6 +34,7 @@ bool fs_stat(const char* path, FsStat& out);
 bool fs_write_file(const char* path, const unsigned char* data, size_t len);
 bool fs_append_file(const char* path, const unsigned char* data, size_t len);
 bool fs_resolve_path(const char* path, char* out, size_t out_sz);
+bool fs_resolve_real_path(const char* path, char* out, size_t out_sz);
 
 // fichiers / dossiers (SD)
 bool fs_mkdir(const char* path);

@@ -613,6 +613,11 @@ bool fs_resolve_path(const char* path, char* out, size_t out_sz)
     return fs_norm(cwd, path, out, out_sz);
 }
 
+bool fs_resolve_real_path(const char* path, char* out, size_t out_sz)
+{
+    return fs_resolve_media_path(path, out, out_sz);
+}
+
 bool fs_stat(const char* path, FsStat& out)
 {
     out.size = 0;

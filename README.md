@@ -41,6 +41,7 @@ Includes a terminal, a minimal vi (or nano) editor, core commands, and Lx script
 - [tee](commands/tee.md) - write piped output to a file
 - [touch](commands/touch.md) - create/update file
 - [umount](commands/umount.md) - unmount SD card
+- [view](commands/view.md) - image viewer (PNG/JPEG)
 - [vi](commands/vi.md) - minimal editor
 
 ## Target hardware

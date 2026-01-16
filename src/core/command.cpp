@@ -2,6 +2,7 @@
 
 #include "ui/terminal.h"
 #include "ui/encoding.h"
+#include "ui/screen.h"
 #include "fs/fs.h"
 #include "editor/editor.h"
 #include "lx_runner.h"
@@ -12,6 +13,7 @@
 #include <ctype.h>
 #include <Arduino.h>
 #include <M5Unified.h>
+#include <M5Cardputer.h>
 
 static std::string trim_copy(const std::string& in)
 {
@@ -42,6 +44,60 @@ static const char* find_unquoted_char(const char* line, char ch)
         }
     }
     return nullptr;
+}
+
+static bool view_any_key_pressed()
+{
+    auto &st = M5Cardputer.Keyboard.keysState();
+    if (!st.word.empty()) return true;
+    if (st.enter || st.del || st.tab) return true;
+    if (st.fn || st.shift || st.ctrl || st.opt || st.alt) return true;
+    return false;
+}
+
+static void view_wait_for_key()
+{
+    // Wait for any prior key to be released first.
+    for (;;) {
+        M5.update();
+        M5Cardputer.update();
+        M5Cardputer.Keyboard.updateKeyList();
+        M5Cardputer.Keyboard.updateKeysState();
+        if (!view_any_key_pressed()) {
+            break;
+        }
+        delay(10);
+    }
+
+    // Then wait for a fresh key press.
+    for (;;) {
+        M5.update();
+        M5Cardputer.update();
+        M5Cardputer.Keyboard.updateKeyList();
+        M5Cardputer.Keyboard.updateKeysState();
+        if (view_any_key_pressed()) {
+            break;
+        }
+        delay(10);
+    }
+}
+
+static bool has_ext(const char* path, const char* ext)
+{
+    size_t path_len = strlen(path);
+    size_t ext_len = strlen(ext);
+    if (path_len < ext_len) {
+        return false;
+    }
+    const char* tail = path + (path_len - ext_len);
+    for (size_t i = 0; i < ext_len; i++) {
+        char a = (char)tolower((unsigned char)tail[i]);
+        char b = (char)tolower((unsigned char)ext[i]);
+        if (a != b) {
+            return false;
+        }
+    }
+    return true;
 }
 
 static const float kBatteryCapacityMah = 1200.0f;
@@ -240,6 +296,16 @@ static std::string man_entry(const char* name)
          "\n"
          "NOTES\n"
          "  Modes: NORMAL/INSERT/COMMAND/Search\n"},
+        {"view",
+         "NAME\n"
+         "  view - display a PNG or JPEG image\n"
+         "\n"
+         "SYNOPSIS\n"
+         "  view <path>\n"
+         "\n"
+         "NOTES\n"
+         "  The image is scaled to fit the screen while preserving aspect ratio.\n"
+         "  Press any key to return to the shell.\n"},
         {"nano",
          "NAME\n"
          "  nano - minimal editor (nano-style)\n"
@@ -583,6 +649,56 @@ static bool command_exec_line(const char* line, bool allow_pipe)
     if (strcmp(cmd, "vi") == 0) {
         const char* path = (*arg1) ? arg1 : "";
         editor_open(path);
+        return true;
+    }
+
+    // --------------------------------------------------------
+    // view <path>
+    // --------------------------------------------------------
+    if (strcmp(cmd, "view") == 0) {
+        if (!*arg1) {
+            term_error("missing operand");
+            return false;
+        }
+
+        char real[128];
+        if (!fs_resolve_real_path(arg1, real, sizeof(real))) {
+            term_error("cannot read");
+            return false;
+        }
+
+        bool is_png = has_ext(real, ".png");
+        bool is_jpg = has_ext(real, ".jpg") || has_ext(real, ".jpeg");
+        if (!is_png && !is_jpg) {
+            term_error("unsupported format");
+            return false;
+        }
+
+        screen_clear();
+        screen_set_color(TFT_LIGHTGREY, TFT_BLACK);
+        screen_draw_text(9, 3, "please wait");
+
+        int16_t w = M5.Display.width();
+        int16_t h = M5.Display.height();
+        M5.Display.setTextDatum(lgfx::datum_t::middle_center);
+        const char* path = real;
+        bool ok = is_png
+            ? M5.Display.drawPngFile(path, 0, 0, w, h, 0, 0, 0.0f, 0.0f,
+                lgfx::datum_t::middle_center)
+            : M5.Display.drawJpgFile(path, 0, 0, w, h, 0, 0, 0.0f, 0.0f,
+                lgfx::datum_t::middle_center);
+        M5.Display.setTextDatum(lgfx::datum_t::top_left);
+
+        if (!ok) {
+            screen_clear();
+            term_redraw();
+            term_error("cannot read");
+            return false;
+        }
+
+        view_wait_for_key();
+        screen_clear();
+        term_redraw();
         return true;
     }
 
