@@ -42,6 +42,7 @@ Includes a terminal, a minimal vi (or nano) editor, core commands, and Lx script
 - [touch](commands/touch.md) - create/update file
 - [umount](commands/umount.md) - unmount SD card
 - [view](commands/view.md) - image viewer (PNG/JPEG)
+- [play](commands/play.md) - audio player (WAV/MP3)
 - [vi](commands/vi.md) - minimal editor
 
 ## Target hardware

@@ -6,6 +6,8 @@
 #include "fs/fs.h"
 #include "editor/editor.h"
 #include "lx_runner.h"
+#include "audio/mp3_player.h"
+#include "audio/wav_player.h"
 
 #include <string.h>
 #include <string>
@@ -99,6 +101,7 @@ static bool has_ext(const char* path, const char* ext)
     }
     return true;
 }
+
 
 static const float kBatteryCapacityMah = 1200.0f;
 static const float kEstimatedDischargeMa = 200.0f;
@@ -306,6 +309,15 @@ static std::string man_entry(const char* name)
          "NOTES\n"
          "  The image is scaled to fit the screen while preserving aspect ratio.\n"
          "  Press any key to return to the shell.\n"},
+        {"play",
+         "NAME\n"
+         "  play - play a WAV or MP3 file\n"
+         "\n"
+         "SYNOPSIS\n"
+         "  play [-v 0-100] <path>\n"
+         "\n"
+         "NOTES\n"
+         "  Press any key to stop playback.\n"},
         {"nano",
          "NAME\n"
          "  nano - minimal editor (nano-style)\n"
@@ -699,6 +711,77 @@ static bool command_exec_line(const char* line, bool allow_pipe)
         view_wait_for_key();
         screen_clear();
         term_redraw();
+        return true;
+    }
+
+    // --------------------------------------------------------
+    // play [-v 0-100] <path>
+    // --------------------------------------------------------
+    if (strcmp(cmd, "play") == 0) {
+        const char* path = arg1;
+        int volume = -1;
+        if (strcmp(arg1, "-v") == 0) {
+            if (!*arg2 || !*arg3) {
+                term_error("usage: play [-v 0-100] <path>");
+                return false;
+            }
+            volume = atoi(arg2);
+            path = arg3;
+        }
+        if (!*path) {
+            term_error("missing operand");
+            return false;
+        }
+
+        char real[128];
+        if (!fs_resolve_real_path(path, real, sizeof(real))) {
+            term_error("cannot read");
+            return false;
+        }
+
+        bool is_wav = has_ext(real, ".wav");
+        bool is_mp3 = has_ext(real, ".mp3");
+        if (!is_wav && !is_mp3) {
+            term_error("unsupported format");
+            return false;
+        }
+
+        std::vector<uint8_t> data;
+        uint8_t prev_vol = M5.Speaker.getVolume();
+        if (volume >= 0) {
+            if (volume > 100) volume = 100;
+            uint8_t v = (uint8_t)((volume * 255) / 100);
+            M5.Speaker.setVolume(v);
+        }
+
+        auto spk_cfg = M5.Speaker.config();
+        spk_cfg.dma_buf_len = 1024;
+        spk_cfg.dma_buf_count = 16;
+        spk_cfg.task_priority = 3;
+        spk_cfg.task_pinned_core = 0;
+        M5.Speaker.config(spk_cfg);
+        M5.Speaker.begin();
+        if (is_mp3) {
+            if (!play_mp3_file(real)) {
+                if (volume >= 0) {
+                    M5.Speaker.setVolume(prev_vol);
+                }
+                term_error("cannot play");
+                return false;
+            }
+        } else {
+            if (!play_wav_file(real)) {
+                if (volume >= 0) {
+                    M5.Speaker.setVolume(prev_vol);
+                }
+                term_error("cannot play");
+                return false;
+            }
+        }
+
+        if (volume >= 0) {
+            M5.Speaker.setVolume(prev_vol);
+        }
         return true;
     }
 
