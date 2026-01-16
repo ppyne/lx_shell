@@ -3,6 +3,8 @@
 Minimal Unix‑like shell optimized for the **Cardputer ADV**.
 Includes a terminal, a minimal vi (or nano) editor, core commands, and Lx script execution.
 
+![M5Stack Cardputer ADV](m5stack_cardputer_adv.jpg)
+
 ## Features
 
 - Interactive terminal with history, autocompletion, and pager (`more`/`less`)
