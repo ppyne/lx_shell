@@ -21,11 +21,23 @@ enum EditorMode {
     MODE_NORMAL,
     MODE_INSERT,
     MODE_COMMAND,
-    MODE_SEARCH
+    MODE_SEARCH,
+    MODE_PROMPT
 };
 
 static bool active = false;
 static EditorMode mode = MODE_NORMAL;
+static bool nano_mode = false;
+
+enum PromptKind {
+    PROMPT_NONE,
+    PROMPT_WRITE
+};
+
+static PromptKind prompt_kind = PROMPT_NONE;
+static std::string prompt_label;
+static std::string prompt_buffer;
+static bool nano_pending_quit = false;
 
 static std::vector<std::string> lines;
 static int cur_row = 0;
@@ -170,7 +182,8 @@ static void clamp_cursor()
     if (cur_row >= (int)lines.size()) cur_row = (int)lines.size() - 1;
 
     int len = (int)lines[cur_row].size();
-    if (mode == MODE_INSERT) {
+    bool allow_past_end = (mode == MODE_INSERT) || nano_mode;
+    if (allow_past_end) {
         if (cur_col < 0) cur_col = 0;
         if (cur_col > len) cur_col = len;
     } else {
@@ -287,9 +300,13 @@ static void redraw()
     if (mode == MODE_COMMAND) {
         status = ":" + cmd_buffer;
     } else if (mode == MODE_SEARCH) {
-        status = "/" + search_buffer;
+        status = nano_mode ? "Search: " + search_buffer : "/" + search_buffer;
+    } else if (mode == MODE_PROMPT) {
+        status = prompt_label + prompt_buffer;
     } else if (!status_msg.empty()) {
         status = status_msg;
+    } else if (nano_mode) {
+        status = "^O Wr ^X Ex ^W Fi ^K Cu ^U Pu";
     } else {
         status = (mode == MODE_INSERT) ? "INSERT" : "NORMAL";
         if (!current_file.empty()) {
@@ -631,6 +648,11 @@ void editor_init()
 {
     active = false;
     mode = MODE_NORMAL;
+    nano_mode = false;
+    prompt_kind = PROMPT_NONE;
+    prompt_label.clear();
+    prompt_buffer.clear();
+    nano_pending_quit = false;
     lines.clear();
     current_file.clear();
     dirty = false;
@@ -649,10 +671,15 @@ bool editor_is_active()
     return active;
 }
 
-void editor_open(const char* path)
+static void editor_open_impl(const char* path, bool use_nano)
 {
     active = true;
-    mode = MODE_NORMAL;
+    nano_mode = use_nano;
+    mode = use_nano ? MODE_INSERT : MODE_NORMAL;
+    prompt_kind = PROMPT_NONE;
+    prompt_label.clear();
+    prompt_buffer.clear();
+    nano_pending_quit = false;
     pending_delete = false;
     pending_replace = false;
     pending_shift = 0;
@@ -676,6 +703,16 @@ void editor_open(const char* path)
     clamp_cursor();
     ensure_cursor_visible();
     redraw();
+}
+
+void editor_open(const char* path)
+{
+    editor_open_impl(path, false);
+}
+
+void editor_open_with_mode(const char* path, bool use_nano)
+{
+    editor_open_impl(path, use_nano);
 }
 
 static void shift_current_line(int dir)
@@ -790,8 +827,43 @@ void editor_handle_char(char c)
 {
     if (!active) return;
 
-    if (!status_msg.empty() && mode == MODE_NORMAL) {
+    if (!status_msg.empty() && (mode == MODE_NORMAL || nano_mode)) {
         status_msg.clear();
+    }
+
+    if (nano_mode) {
+        nano_pending_quit = false;
+
+        if (mode == MODE_PROMPT) {
+            if (c >= 32 && c <= 126) {
+                prompt_buffer.push_back(c);
+            }
+            redraw();
+            return;
+        }
+
+        if (mode == MODE_SEARCH) {
+            if (c >= 32 && c <= 126) {
+                search_buffer.push_back(c);
+            }
+            redraw();
+            return;
+        }
+
+        if (mode != MODE_INSERT) {
+            return;
+        }
+
+        if (c >= 32 && c <= 126) {
+            ensure_line_exists();
+            lines[cur_row].insert((size_t)cur_col, 1, c);
+            cur_col++;
+            dirty = true;
+        }
+        clamp_cursor();
+        ensure_cursor_visible();
+        redraw();
+        return;
     }
 
     if (mode == MODE_COMMAND) {
@@ -988,8 +1060,12 @@ void editor_handle_char_raw(uint8_t c)
 {
     if (!active) return;
 
-    if (!status_msg.empty() && mode == MODE_NORMAL) {
+    if (!status_msg.empty() && (mode == MODE_NORMAL || nano_mode)) {
         status_msg.clear();
+    }
+
+    if (nano_mode) {
+        nano_pending_quit = false;
     }
 
     if (mode != MODE_INSERT) {
@@ -1008,6 +1084,16 @@ void editor_handle_char_raw(uint8_t c)
 void editor_handle_backspace()
 {
     if (!active) return;
+
+    if (nano_mode) {
+        nano_pending_quit = false;
+    }
+
+    if (mode == MODE_PROMPT) {
+        if (!prompt_buffer.empty()) prompt_buffer.pop_back();
+        redraw();
+        return;
+    }
 
     if (mode == MODE_COMMAND) {
         if (!cmd_buffer.empty()) cmd_buffer.pop_back();
@@ -1047,6 +1133,35 @@ void editor_handle_enter()
 {
     if (!active) return;
 
+    if (nano_mode) {
+        nano_pending_quit = false;
+    }
+
+    if (mode == MODE_PROMPT) {
+        if (prompt_kind == PROMPT_WRITE) {
+            std::string path = prompt_buffer;
+            while (!path.empty() && path[0] == ' ') {
+                path.erase(0, 1);
+            }
+            if (path.empty()) {
+                if (current_file.empty()) {
+                    set_status("no file name");
+                } else {
+                    write_file(make_abs_path(current_file));
+                }
+            } else {
+                current_file = make_abs_path(path);
+                write_file(current_file);
+            }
+        }
+        prompt_kind = PROMPT_NONE;
+        prompt_label.clear();
+        prompt_buffer.clear();
+        mode = nano_mode ? MODE_INSERT : MODE_NORMAL;
+        redraw();
+        return;
+    }
+
     if (mode == MODE_COMMAND) {
         handle_command();
         if (editor_is_active()) {
@@ -1058,7 +1173,7 @@ void editor_handle_enter()
     if (mode == MODE_SEARCH) {
         last_search = search_buffer;
         search_buffer.clear();
-        mode = MODE_NORMAL;
+        mode = nano_mode ? MODE_INSERT : MODE_NORMAL;
         if (!find_next(last_search)) {
             set_status("pattern not found");
         }
@@ -1091,6 +1206,18 @@ void editor_handle_escape()
     pending_delete = false;
     pending_replace = false;
     normal_count.clear();
+    nano_pending_quit = false;
+
+    if (nano_mode) {
+        mode = MODE_INSERT;
+        prompt_kind = PROMPT_NONE;
+        prompt_label.clear();
+        prompt_buffer.clear();
+        cmd_buffer.clear();
+        search_buffer.clear();
+        redraw();
+        return;
+    }
 
     if (mode != MODE_NORMAL) {
         mode = MODE_NORMAL;
@@ -1151,4 +1278,62 @@ void editor_cursor_right()
     clamp_cursor();
     ensure_cursor_visible();
     redraw();
+}
+
+void editor_handle_ctrl(uint8_t c)
+{
+    if (!active || !nano_mode) return;
+
+    if (c >= 'A' && c <= 'Z') {
+        c = (uint8_t)(c - 'A' + 'a');
+    }
+
+    switch (c) {
+        case 'x':
+            if (dirty && !nano_pending_quit) {
+                nano_pending_quit = true;
+                set_status("modified: Ctrl+O write, Ctrl+X exit");
+                redraw();
+                return;
+            }
+            editor_close();
+            return;
+        case 'o':
+            nano_pending_quit = false;
+            mode = MODE_PROMPT;
+            prompt_kind = PROMPT_WRITE;
+            prompt_label = "Write: ";
+            prompt_buffer = current_file;
+            redraw();
+            return;
+        case 'w':
+            nano_pending_quit = false;
+            mode = MODE_SEARCH;
+            search_buffer.clear();
+            redraw();
+            return;
+        case 'k':
+            nano_pending_quit = false;
+            delete_current_line();
+            clamp_cursor();
+            ensure_cursor_visible();
+            set_status("cut");
+            redraw();
+            return;
+        case 'u':
+            nano_pending_quit = false;
+            paste_line_below();
+            clamp_cursor();
+            ensure_cursor_visible();
+            set_status("pasted");
+            redraw();
+            return;
+        case 'g':
+            nano_pending_quit = false;
+            set_status("nano: ^O write ^X exit ^W find ^K cut ^U paste");
+            redraw();
+            return;
+        default:
+            return;
+    }
 }

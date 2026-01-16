@@ -240,6 +240,15 @@ static std::string man_entry(const char* name)
          "\n"
          "NOTES\n"
          "  Modes: NORMAL/INSERT/COMMAND/Search\n"},
+        {"nano",
+         "NAME\n"
+         "  nano - minimal editor (nano-style)\n"
+         "\n"
+         "SYNOPSIS\n"
+         "  nano [path]\n"
+         "\n"
+         "KEYS\n"
+         "  ^O write  ^X exit  ^W search  ^K cut line  ^U paste\n"},
         {"uptime",
          "NAME\n"
          "  uptime - show time since boot\n"
@@ -574,6 +583,15 @@ static bool command_exec_line(const char* line, bool allow_pipe)
     if (strcmp(cmd, "vi") == 0) {
         const char* path = (*arg1) ? arg1 : "";
         editor_open(path);
+        return true;
+    }
+
+    // --------------------------------------------------------
+    // nano [path]
+    // --------------------------------------------------------
+    if (strcmp(cmd, "nano") == 0) {
+        const char* path = (*arg1) ? arg1 : "";
+        editor_open_with_mode(path, true);
         return true;
     }
 

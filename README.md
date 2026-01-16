@@ -1,15 +1,15 @@
 # Lx Shell for M5Stack Cardputer ADV
 
 Minimal Unix‑like shell optimized for the **Cardputer ADV**.
-Includes a terminal, a minimal vi editor, core commands, and Lx script execution.
+Includes a terminal, a minimal vi (or nano) editor, core commands, and Lx script execution.
 
 ## Features
 
 - Interactive terminal with history, autocompletion, and pager (`more`/`less`)
-- Minimal vi editor (navigation, insertion, indentation, visual wrapping)
+- Minimal vi and nano editors (navigation, insertion, indentation, visual wrapping)
 - Core commands: `battery`, `cat`, `cd`, `cp`, `find`, `ls`, `mount`, `mv`, `rm`, `umount`
 - Run Lx scripts (`lx <script.lx>`)
-- Output redirection (`>`, `>>`) and `tee`
+- Output redirection (`>`, `>>`), pipes (`|`), and `tee`
 - Screensaver + display sleep
 - Keyboard with CP437 extended glyphs and optional debug
 
@@ -30,6 +30,7 @@ Includes a terminal, a minimal vi editor, core commands, and Lx script execution
 - [more](commands/more.md) - pager for files and output
 - [mount](commands/mount.md) - mount SD card
 - [mv](commands/mv.md) - move/rename file
+- [nano](commands/nano.md) - minimal editor (nano-style)
 - [pwd](commands/pwd.md) - print working directory
 - [reset](commands/reset.md) - alias for `clear`
 - [rm](commands/rm.md) - remove file

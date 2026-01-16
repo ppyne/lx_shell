@@ -228,6 +228,11 @@ void keyboard_poll()
             if (!key_debounce_allow((uint8_t)c)) {
                 continue;
             }
+            if (editor_is_active()) {
+                debug_key_event("ctrl", c);
+                editor_handle_ctrl((uint8_t)c);
+                return;
+            }
             if (c == 'c' || c == 'C') {
                 debug_key_event("ctrl+c", 0x03);
                 if (term_pager_active()) {
