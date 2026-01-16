@@ -108,6 +108,7 @@ Profiles reserve a minimum amount of free heap to avoid hard OOM crashes.
 ## Lx project (submodule)
 
 The Lx engine is integrated as a **submodule** in `lib/lx`.
+Upstream project: https://github.com/ppyne/lx
 To update:
 
 ```bash
