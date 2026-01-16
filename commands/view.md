@@ -12,6 +12,7 @@ view <path>
 
 ## Notes
 
-- Press any key to return to the shell.
+- Press `r` to rotate 90 degrees (cycles 0/90/180/270).
+- Press any other key to return to the shell.
 - JPEG: baseline JPEG (no progressive/CMYK); very large images may fail due to memory.
 - PNG: standard non-animated PNG; interlaced PNG may fail; very large images may fail due to memory.

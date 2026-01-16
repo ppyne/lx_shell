@@ -5,6 +5,7 @@
 #include "ui/screen.h"
 #include "ui/terminal.h"
 #include "ui/keyboard.h"
+#include "ui/screensaver.h"
 #include "fs/fs.h"
 #include "editor/editor.h"
 
@@ -34,6 +35,7 @@ struct Star {
 static Star stars[kSaverStars];
 static bool saver_active = false;
 static bool screen_off = false;
+static bool saver_suspended = false;
 static uint32_t last_saver_frame_ms = 0;
 
 static void init_stars()
@@ -100,6 +102,19 @@ static void screensaver_update(uint32_t now_ms)
 }
 } // namespace
 
+void screensaver_set_suspend(bool suspended)
+{
+    saver_suspended = suspended;
+    if (saver_suspended && (saver_active || screen_off)) {
+        screensaver_stop();
+    }
+}
+
+bool screensaver_is_suspended()
+{
+    return saver_suspended;
+}
+
 void setup()
 {
     M5.begin();          // OBLIGATOIRE, TOUJOURS EN PREMIER
@@ -140,20 +155,26 @@ void loop()
     uint32_t last_activity_ms = keyboard_last_activity_ms();
     uint32_t idle_ms = now_ms - last_activity_ms;
 
-    if ((saver_active || screen_off) && idle_ms < kSaverStartMs) {
-        screensaver_stop();
-    }
+    if (saver_suspended) {
+        if (saver_active || screen_off) {
+            screensaver_stop();
+        }
+    } else {
+        if ((saver_active || screen_off) && idle_ms < kSaverStartMs) {
+            screensaver_stop();
+        }
 
-    if (!screen_off && idle_ms >= kScreenOffMs) {
-        screensaver_off();
-        return;
-    }
+        if (!screen_off && idle_ms >= kScreenOffMs) {
+            screensaver_off();
+            return;
+        }
 
-    if (!saver_active && idle_ms >= kSaverStartMs) {
-        screensaver_start();
-    }
+        if (!saver_active && idle_ms >= kSaverStartMs) {
+            screensaver_start();
+        }
 
-    if (saver_active) {
-        screensaver_update(now_ms);
+        if (saver_active) {
+            screensaver_update(now_ms);
+        }
     }
 }

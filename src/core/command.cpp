@@ -3,6 +3,7 @@
 #include "ui/terminal.h"
 #include "ui/encoding.h"
 #include "ui/screen.h"
+#include "ui/screensaver.h"
 #include "fs/fs.h"
 #include "editor/editor.h"
 #include "lx_runner.h"
@@ -12,6 +13,7 @@
 #include <string.h>
 #include <string>
 #include <vector>
+#include <algorithm>
 #include <ctype.h>
 #include <Arduino.h>
 #include <M5Unified.h>
@@ -57,6 +59,15 @@ static bool view_any_key_pressed()
     return false;
 }
 
+static bool view_any_key_pressed_no_fn()
+{
+    auto &st = M5Cardputer.Keyboard.keysState();
+    if (!st.word.empty()) return true;
+    if (st.enter || st.del || st.tab) return true;
+    if (st.shift || st.ctrl || st.opt || st.alt) return true;
+    return false;
+}
+
 static void view_wait_for_key()
 {
     // Wait for any prior key to be released first.
@@ -82,6 +93,108 @@ static void view_wait_for_key()
         }
         delay(10);
     }
+}
+
+static void view_wait_for_key_release()
+{
+    for (;;) {
+        M5.update();
+        M5Cardputer.update();
+        M5Cardputer.Keyboard.updateKeyList();
+        M5Cardputer.Keyboard.updateKeysState();
+        if (!view_any_key_pressed()) {
+            break;
+        }
+        delay(10);
+    }
+}
+
+static void view_wait_for_nav_release()
+{
+    for (;;) {
+        M5.update();
+        M5Cardputer.update();
+        M5Cardputer.Keyboard.updateKeyList();
+        M5Cardputer.Keyboard.updateKeysState();
+        auto &st = M5Cardputer.Keyboard.keysState();
+        bool nav_pressed = false;
+        for (char c : st.word) {
+            if (c == '/' || c == '?' || c == ',' || c == '<') {
+                nav_pressed = true;
+                break;
+            }
+        }
+        if (!nav_pressed) {
+            break;
+        }
+        delay(10);
+    }
+}
+
+static void view_wait_for_char_release(char target)
+{
+    for (;;) {
+        M5.update();
+        M5Cardputer.update();
+        M5Cardputer.Keyboard.updateKeyList();
+        M5Cardputer.Keyboard.updateKeysState();
+        auto &st = M5Cardputer.Keyboard.keysState();
+        bool pressed = false;
+        for (char c : st.word) {
+            if (c == target) {
+                pressed = true;
+                break;
+            }
+        }
+        if (!pressed) {
+            break;
+        }
+        delay(10);
+    }
+}
+
+static bool has_ext(const char* path, const char* ext);
+
+static bool view_render_image(const char* real_path)
+{
+    int16_t w = M5.Display.width();
+    int16_t h = M5.Display.height();
+    M5.Display.setTextDatum(lgfx::datum_t::middle_center);
+    const bool is_png = has_ext(real_path, ".png");
+    const bool is_jpg = has_ext(real_path, ".jpg") || has_ext(real_path, ".jpeg");
+    bool ok = is_png
+        ? M5.Display.drawPngFile(real_path, 0, 0, w, h, 0, 0, 0.0f, 0.0f,
+            lgfx::datum_t::middle_center)
+        : M5.Display.drawJpgFile(real_path, 0, 0, w, h, 0, 0, 0.0f, 0.0f,
+            lgfx::datum_t::middle_center);
+    M5.Display.setTextDatum(lgfx::datum_t::top_left);
+    return ok;
+}
+
+static int slideshow_read_input()
+{
+    M5.update();
+    M5Cardputer.update();
+    M5Cardputer.Keyboard.updateKeyList();
+    M5Cardputer.Keyboard.updateKeysState();
+
+    auto &st = M5Cardputer.Keyboard.keysState();
+    if (st.fn) {
+        for (char c : st.word) {
+            if (c == '/' || c == '?') return 1;
+            if (c == ',' || c == '<') return -1;
+        }
+    }
+
+    for (char c : st.word) {
+        if (c == 'r' || c == 'R') return 2;
+    }
+
+    if (!st.word.empty() || st.enter || st.del || st.tab || st.shift || st.ctrl || st.opt || st.alt) {
+        return 99;
+    }
+
+    return 0;
 }
 
 static bool has_ext(const char* path, const char* ext)
@@ -308,6 +421,19 @@ static std::string man_entry(const char* name)
          "\n"
          "NOTES\n"
          "  The image is scaled to fit the screen while preserving aspect ratio.\n"
+         "  Press 'r' to rotate 90 degrees.\n"
+         "  Press any other key to return to the shell.\n"},
+        {"slideshow",
+         "NAME\n"
+         "  slideshow - browse images in a folder\n"
+         "\n"
+         "SYNOPSIS\n"
+         "  slideshow [-t seconds] <path>\n"
+         "\n"
+         "NOTES\n"
+         "  Use fn+left / fn+right to navigate.\n"
+         "  Press 'r' to rotate 90 degrees (disabled with -t).\n"
+         "  The -t value is clamped to 2..120 seconds.\n"
          "  Press any key to return to the shell.\n"},
         {"play",
          "NAME\n"
@@ -687,19 +813,9 @@ static bool command_exec_line(const char* line, bool allow_pipe)
         }
 
         screen_clear();
-        screen_set_color(TFT_LIGHTGREY, TFT_BLACK);
-        screen_draw_text(9, 3, "please wait");
-
-        int16_t w = M5.Display.width();
-        int16_t h = M5.Display.height();
-        M5.Display.setTextDatum(lgfx::datum_t::middle_center);
-        const char* path = real;
-        bool ok = is_png
-            ? M5.Display.drawPngFile(path, 0, 0, w, h, 0, 0, 0.0f, 0.0f,
-                lgfx::datum_t::middle_center)
-            : M5.Display.drawJpgFile(path, 0, 0, w, h, 0, 0, 0.0f, 0.0f,
-                lgfx::datum_t::middle_center);
-        M5.Display.setTextDatum(lgfx::datum_t::top_left);
+        uint8_t base_rotation = M5.Display.getRotation();
+        uint8_t rotation = base_rotation;
+        bool ok = view_render_image(real);
 
         if (!ok) {
             screen_clear();
@@ -708,9 +824,192 @@ static bool command_exec_line(const char* line, bool allow_pipe)
             return false;
         }
 
-        view_wait_for_key();
+        for (;;) {
+            M5.update();
+            M5Cardputer.update();
+            M5Cardputer.Keyboard.updateKeyList();
+            M5Cardputer.Keyboard.updateKeysState();
+            auto &st = M5Cardputer.Keyboard.keysState();
+            bool saw_r = false;
+            for (char c : st.word) {
+                if (c == 'r' || c == 'R') {
+                    saw_r = true;
+                    break;
+                }
+            }
+            if (saw_r) {
+                rotation = (uint8_t)((rotation + 1) % 4);
+                M5.Display.setRotation(rotation);
+                screen_clear();
+                view_render_image(real);
+                view_wait_for_char_release('r');
+                view_wait_for_char_release('R');
+                continue;
+            }
+            if (view_any_key_pressed_no_fn()) {
+                break;
+            }
+            delay(10);
+        }
+
+        M5.Display.setRotation(base_rotation);
         screen_clear();
         term_redraw();
+        return true;
+    }
+
+    // --------------------------------------------------------
+    // slideshow [-t seconds] <path>
+    // --------------------------------------------------------
+    if (strcmp(cmd, "slideshow") == 0) {
+        const char* path = arg1;
+        int interval = 0;
+        if (strcmp(arg1, "-t") == 0) {
+            if (!*arg2 || !*arg3) {
+                term_error("usage: slideshow [-t seconds] <path>");
+                return false;
+            }
+            interval = atoi(arg2);
+            if (interval < 2) interval = 2;
+            if (interval > 120) interval = 120;
+            path = arg3;
+        }
+        if (!*path) {
+            term_error("missing operand");
+            return false;
+        }
+
+        const bool suspend_saver = (interval > 0);
+        if (suspend_saver) {
+            screensaver_set_suspend(true);
+        }
+
+        std::vector<FsEntry> entries;
+        if (!fs_list_entries(path, entries, false)) {
+            if (suspend_saver) {
+                screensaver_set_suspend(false);
+            }
+            term_error("cannot read");
+            return false;
+        }
+
+        std::vector<std::string> items;
+        for (const auto& entry : entries) {
+            if (entry.is_dir) {
+                continue;
+            }
+            std::string name = entry.name;
+            std::string lower = name;
+            for (char& c : lower) {
+                c = (char)tolower((unsigned char)c);
+            }
+            if (lower.size() >= 4 &&
+                (lower.rfind(".png") == lower.size() - 4 ||
+                 lower.rfind(".jpg") == lower.size() - 4 ||
+                 lower.rfind(".jpeg") == lower.size() - 5)) {
+                items.push_back(name);
+            }
+        }
+
+        if (items.empty()) {
+            if (suspend_saver) {
+                screensaver_set_suspend(false);
+            }
+            term_error("no images found");
+            return false;
+        }
+
+        std::sort(items.begin(), items.end());
+
+        auto make_path = [&](const std::string& name) {
+            std::string p = path;
+            if (!p.empty() && p.back() != '/') {
+                p.push_back('/');
+            }
+            p += name;
+            return p;
+        };
+
+        size_t index = 0;
+        uint8_t base_rotation = M5.Display.getRotation();
+        uint8_t rotation = base_rotation;
+        uint32_t next_tick = 0;
+
+        for (;;) {
+            std::string item_path = make_path(items[index]);
+            char real[128];
+            if (!fs_resolve_real_path(item_path.c_str(), real, sizeof(real))) {
+                term_error("cannot read");
+                break;
+            }
+
+            screen_clear();
+            if (!view_render_image(real)) {
+                term_error("cannot read");
+                break;
+            }
+            if (interval > 0) {
+                next_tick = millis() + (uint32_t)interval * 1000U;
+            }
+
+            bool advance = false;
+            for (;;) {
+                int input = slideshow_read_input();
+                if (input == 99) {
+                    M5.Display.setRotation(base_rotation);
+                    screen_clear();
+                    term_redraw();
+                    if (suspend_saver) {
+                        screensaver_set_suspend(false);
+                    }
+                    return true;
+                }
+                if (input == 2 && interval == 0) {
+                    rotation = (uint8_t)((rotation + 1) % 4);
+                    M5.Display.setRotation(rotation);
+                    screen_clear();
+                    view_render_image(real);
+                    view_wait_for_char_release('r');
+                    view_wait_for_char_release('R');
+                    continue;
+                }
+                if (input == 1) {
+                    index = (index + 1) % items.size();
+                    rotation = base_rotation;
+                    M5.Display.setRotation(rotation);
+                    view_wait_for_nav_release();
+                    advance = true;
+                    break;
+                }
+                if (input == -1) {
+                    index = (index + items.size() - 1) % items.size();
+                    rotation = base_rotation;
+                    M5.Display.setRotation(rotation);
+                    view_wait_for_nav_release();
+                    advance = true;
+                    break;
+                }
+                if (interval > 0 && millis() >= next_tick) {
+                    index = (index + 1) % items.size();
+                    rotation = base_rotation;
+                    M5.Display.setRotation(rotation);
+                    next_tick = millis() + (uint32_t)interval * 1000U;
+                    advance = true;
+                    break;
+                }
+                delay(10);
+            }
+
+            if (!advance) {
+                break;
+            }
+        }
+
+        screen_clear();
+        term_redraw();
+        if (suspend_saver) {
+            screensaver_set_suspend(false);
+        }
         return true;
     }
 

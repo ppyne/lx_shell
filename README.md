@@ -9,7 +9,7 @@ Includes a terminal, a minimal vi (or nano) editor, core commands, and Lx script
 
 - Interactive terminal with history, autocompletion, and pager (`more`/`less`)
 - Minimal vi and nano editors (navigation, insertion, indentation, visual wrapping)
-- Core commands: `battery`, `cat`, `cd`, `cp`, `find`, `ls`, `mount`, `mv`, `rm`, `umount`
+- Core commands: `battery`, `cat`, `cd`, `cp`, `find`, `ls`, `mount`, `mv`, `rm`, `slideshow`, `umount`, `view`
 - Run Lx scripts (`lx <script.lx>`)
 - Output redirection (`>`, `>>`), pipes (`|`), and `tee`
 - Screensaver + display sleep
@@ -37,6 +37,7 @@ Includes a terminal, a minimal vi (or nano) editor, core commands, and Lx script
 - [reset](commands/reset.md) - alias for `clear`
 - [rm](commands/rm.md) - remove file
 - [rmdir](commands/rmdir.md) - remove directory
+- [slideshow](commands/slideshow.md) - image slideshow (PNG/JPEG)
 - [shutdown](commands/shutdown.md) - halt or restart
 - [tee](commands/tee.md) - write piped output to a file
 - [touch](commands/touch.md) - create/update file
