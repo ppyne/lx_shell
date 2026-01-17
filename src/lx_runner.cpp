@@ -12,6 +12,9 @@
 #include "fs/fs.h"
 #include "ui/terminal.h"
 #include "lxsh_fs_bridge.h"
+#include "lxsh_exec_bridge.h"
+
+#include "../lib/lx/config.h"
 
 extern "C" {
 #include "env.h"
@@ -22,7 +25,17 @@ extern "C" {
 #include "parser.h"
 #include "lx_ext.h"
 #include "ext_lxshfs.h"
+#include "ext_lxshexec.h"
+#include "ext_lxshcli.h"
 #include "memguard.h"
+}
+
+extern "C" {
+void register_json_module(void);
+void register_serializer_module(void);
+void register_hex_module(void);
+void register_time_module(void);
+void register_utf8_module(void);
 }
 
 static void lx_output_cb(const char* data, size_t len)
@@ -147,6 +160,26 @@ static bool lx_run_script_internal(const char* path)
 #if defined(LX_TARGET_LXSH) && LX_TARGET_LXSH
     register_lxshfs_module();
 #endif
+    lxsh_exec_register();
+#if defined(LX_TARGET_LXSH) && LX_TARGET_LXSH
+    register_lxshexec_module();
+    register_lxshcli_module();
+#if LX_ENABLE_JSON
+    register_json_module();
+#endif
+#if LX_ENABLE_SERIALIZER
+    register_serializer_module();
+#endif
+#if LX_ENABLE_HEX
+    register_hex_module();
+#endif
+#if LX_ENABLE_TIME
+    register_time_module();
+#endif
+#if LX_ENABLE_UTF8
+    register_utf8_module();
+#endif
+#endif
     lx_init_modules(global);
 
     EvalResult r = eval_program(program, global);
@@ -167,11 +200,38 @@ struct LxTaskArgs {
 };
 
 static TaskHandle_t g_lx_task_handle = NULL;
+static volatile bool g_lx_script_active = false;
+static volatile bool g_lx_script_cancel = false;
+
+bool lx_script_is_active()
+{
+    return g_lx_script_active;
+}
+
+void lx_script_request_cancel()
+{
+    g_lx_script_cancel = true;
+    lxsh_exec_request_cancel();
+}
+
+void lx_script_clear_cancel()
+{
+    g_lx_script_cancel = false;
+}
+
+extern "C" int lxsh_cancel_requested(void)
+{
+    return g_lx_script_cancel ? 1 : 0;
+}
 
 static void lx_task_entry(void* pv)
 {
     LxTaskArgs* args = static_cast<LxTaskArgs*>(pv);
+    g_lx_script_active = true;
+    g_lx_script_cancel = false;
     args->result = lx_run_script_internal(args->path.c_str());
+    g_lx_script_active = false;
+    g_lx_script_cancel = false;
     g_lx_task_handle = NULL;
     xTaskNotifyGive(args->caller);
     vTaskDelete(NULL);

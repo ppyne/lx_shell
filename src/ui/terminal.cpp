@@ -46,6 +46,10 @@ static const size_t kHistoryMaxLines = 1000;
 static bool capture_active = false;
 static std::string capture_buffer;
 
+static bool raw_input_active = false;
+static int raw_start_row = 0;
+static int raw_start_col = 0;
+
 static bool pager_active = false;
 static std::vector<std::string> pager_lines;
 static int pager_index = 0;
@@ -788,6 +792,43 @@ void term_capture_stop()
 const std::string& term_capture_buffer()
 {
     return capture_buffer;
+}
+
+void term_raw_input_begin()
+{
+    raw_input_active = true;
+    raw_start_row = cur_row;
+    raw_start_col = cur_col;
+}
+
+void term_raw_input_end()
+{
+    raw_input_active = false;
+}
+
+void term_raw_input_char(char c)
+{
+    term_putc(c);
+}
+
+void term_raw_input_backspace()
+{
+    if (!raw_input_active) {
+        return;
+    }
+    if (cur_row < raw_start_row) {
+        return;
+    }
+    if (cur_row == raw_start_row && cur_col <= raw_start_col) {
+        return;
+    }
+    if (cur_col == 0) {
+        cur_row--;
+        cur_col = TERM_COLS;
+    }
+    cur_col--;
+    buffer[cur_row][cur_col] = ' ';
+    refresh_cursor();
 }
 
 void term_pager_start(const std::string& text)

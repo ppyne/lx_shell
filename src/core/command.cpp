@@ -7,6 +7,7 @@
 #include "fs/fs.h"
 #include "editor/editor.h"
 #include "lx_runner.h"
+#include "lxsh_exec_bridge.h"
 #include "audio/mp3_player.h"
 #include "audio/wav_player.h"
 #include "core/settings.h"
@@ -39,6 +40,26 @@ static std::string trim_copy(const std::string& in)
     return in.substr(start, end - start);
 }
 
+static bool ctrl_c_pressed()
+{
+    auto &st = M5Cardputer.Keyboard.keysState();
+    if (!st.ctrl) {
+        return false;
+    }
+    for (char c : st.word) {
+        if (c == 'c' || c == 'C') {
+            if (lxsh_exec_is_active()) {
+                lxsh_exec_request_cancel();
+            }
+            if (lx_script_is_active()) {
+                lx_script_request_cancel();
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
 static const char* find_unquoted_char(const char* line, char ch)
 {
     if (!line) {
@@ -59,6 +80,15 @@ static const char* find_unquoted_char(const char* line, char ch)
 
 static bool view_any_key_pressed()
 {
+    if (ctrl_c_pressed()) {
+        return true;
+    }
+    if (lxsh_exec_cancel_requested()) {
+        return true;
+    }
+    if (lx_script_is_active()) {
+        return false;
+    }
     auto &st = M5Cardputer.Keyboard.keysState();
     if (!st.word.empty()) return true;
     if (st.enter || st.del || st.tab) return true;
@@ -212,6 +242,15 @@ static bool ensure_led_ready()
 
 static bool view_any_key_pressed_no_fn()
 {
+    if (ctrl_c_pressed()) {
+        return true;
+    }
+    if (lxsh_exec_cancel_requested()) {
+        return true;
+    }
+    if (lx_script_is_active()) {
+        return false;
+    }
     auto &st = M5Cardputer.Keyboard.keysState();
     if (!st.word.empty()) return true;
     if (st.enter || st.del || st.tab) return true;
@@ -338,12 +377,21 @@ static bool view_render_image(const char* real_path)
 
 static int slideshow_read_input()
 {
+    if (lxsh_exec_cancel_requested()) {
+        return 99;
+    }
+    if (lx_script_is_active()) {
+        return 0;
+    }
     M5.update();
     M5Cardputer.update();
     M5Cardputer.Keyboard.updateKeyList();
     M5Cardputer.Keyboard.updateKeysState();
 
     auto &st = M5Cardputer.Keyboard.keysState();
+    if (ctrl_c_pressed()) {
+        return 99;
+    }
     if (st.fn) {
         for (char c : st.word) {
             if (c == '/' || c == '?') return 1;

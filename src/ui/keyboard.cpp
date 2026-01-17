@@ -1,4 +1,7 @@
 #include "keyboard.h"
+#include "lxsh_cli_bridge.h"
+#include "lxsh_exec_bridge.h"
+#include "lx_runner.h"
 
 #include <M5Unified.h>
 #include <M5Cardputer.h>
@@ -219,32 +222,75 @@ void keyboard_poll()
     }
     opt_was_down = st.opt;
 
-    if (!input_enabled) {
-        return;
-    }
-
     if (st.ctrl) {
         for (char c : st.word) {
             if (!key_debounce_allow((uint8_t)c)) {
                 continue;
             }
-            if (editor_is_active()) {
-                debug_key_event("ctrl", c);
-                editor_handle_ctrl((uint8_t)c);
-                return;
-            }
             if (c == 'c' || c == 'C') {
                 debug_key_event("ctrl+c", 0x03);
-                if (term_pager_active()) {
+                if (lxsh_exec_is_active()) {
+                    lxsh_exec_request_cancel();
+                    if (lx_script_is_active()) {
+                        lx_script_request_cancel();
+                    }
+                    return;
+                }
+                if (lx_script_is_active()) {
+                    lx_script_request_cancel();
+                    return;
+                }
+                if (input_enabled && term_pager_active()) {
                     term_pager_cancel();
                     return;
                 }
-                if (!editor_is_active()) {
+                if (input_enabled && !editor_is_active()) {
                     term_cancel_input();
                     return;
                 }
             }
+            if (input_enabled && editor_is_active()) {
+                debug_key_event("ctrl", c);
+                editor_handle_ctrl((uint8_t)c);
+                return;
+            }
         }
+    }
+
+    if (!input_enabled) {
+        return;
+    }
+
+    if (lx_script_is_active()) {
+        for (char c : st.word) {
+            if (c == '-') c = '_';
+            else if (c == '_') c = '-';
+            if (!key_debounce_allow((uint8_t)c)) {
+                continue;
+            }
+            if (c >= 32 && c <= 126) {
+                lxsh_cli_push_char((uint8_t)c);
+            }
+        }
+        if (st.del) {
+            if (key_debounce_allow(0x08)) {
+                lxsh_cli_push_char(0x08);
+            }
+            return;
+        }
+        if (st.enter) {
+            if (key_debounce_allow(0x0d)) {
+                lxsh_cli_push_char('\n');
+            }
+            return;
+        }
+        if (st.tab) {
+            if (key_debounce_allow(0x09)) {
+                lxsh_cli_push_char('\t');
+            }
+            return;
+        }
+        return;
     }
 
     // ------------------------------------------------------------

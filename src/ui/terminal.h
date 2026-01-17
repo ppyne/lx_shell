@@ -25,6 +25,11 @@ void term_capture_start();
 void term_capture_stop();
 const std::string& term_capture_buffer();
 
+void term_raw_input_begin();
+void term_raw_input_end();
+void term_raw_input_char(char c);
+void term_raw_input_backspace();
+
 void term_pager_start(const std::string& text);
 bool term_pager_active();
 void term_pager_cancel();
