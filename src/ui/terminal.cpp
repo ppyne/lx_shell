@@ -41,6 +41,7 @@ static int history_index = -1;
 static std::string history_saved_line;
 
 static const char* history_real_path = "/sdcard/.lx_history";
+static const size_t kHistoryMaxLines = 1000;
 
 static bool capture_active = false;
 static std::string capture_buffer;
@@ -283,6 +284,21 @@ static void history_load()
         history.push_back(line);
     }
     fclose(f);
+
+    if (history.size() > kHistoryMaxLines) {
+        history.erase(history.begin(),
+            history.begin() + (history.size() - kHistoryMaxLines));
+        if (fs_sd_mounted()) {
+            FILE* wf = fopen(history_real_path, "w");
+            if (wf) {
+                for (const auto& entry : history) {
+                    fputs(entry.c_str(), wf);
+                    fputc('\n', wf);
+                }
+                fclose(wf);
+            }
+        }
+    }
 }
 
 static void history_append(const std::string& line)
@@ -292,18 +308,35 @@ static void history_append(const std::string& line)
     }
 
     history.push_back(line);
+    bool trimmed = false;
+    if (history.size() > kHistoryMaxLines) {
+        history.erase(history.begin(), history.begin() + 1);
+        trimmed = true;
+    }
 
     if (!fs_sd_mounted()) {
         return;
     }
 
-    FILE* f = fopen(history_real_path, "a");
-    if (!f) {
-        return;
+    if (trimmed) {
+        FILE* f = fopen(history_real_path, "w");
+        if (!f) {
+            return;
+        }
+        for (const auto& entry : history) {
+            fputs(entry.c_str(), f);
+            fputc('\n', f);
+        }
+        fclose(f);
+    } else {
+        FILE* f = fopen(history_real_path, "a");
+        if (!f) {
+            return;
+        }
+        fputs(line.c_str(), f);
+        fputc('\n', f);
+        fclose(f);
     }
-    fputs(line.c_str(), f);
-    fputc('\n', f);
-    fclose(f);
 }
 
 static void set_input_line(const std::string& text)
@@ -574,6 +607,19 @@ static std::string common_prefix(const std::vector<FsEntry>& entries)
     return prefix;
 }
 
+static std::string escape_spaces(const std::string& value)
+{
+    std::string out;
+    out.reserve(value.size());
+    for (char c : value) {
+        if (c == ' ') {
+            out.push_back('\\');
+        }
+        out.push_back(c);
+    }
+    return out;
+}
+
 static void term_show_matches(const std::vector<FsEntry>& matches,
     const std::string& restore_line)
 {
@@ -583,7 +629,8 @@ static void term_show_matches(const std::vector<FsEntry>& matches,
         if (!first) {
             term_putc(' ');
         }
-        term_puts(entry.name.c_str());
+        std::string shown = escape_spaces(entry.name);
+        term_puts(shown.c_str());
         if (entry.is_dir) {
             term_putc('/');
         }
@@ -662,14 +709,14 @@ void term_tab()
 
     std::string common = common_prefix(matches);
     if (common.size() > base.size()) {
-        std::string new_token = dir_part + common;
+        std::string new_token = escape_spaces(dir_part + common);
         current_line = prefix + new_token;
         set_input_line(current_line);
         return;
     }
 
     if (matches.size() == 1) {
-        std::string new_token = dir_part + matches[0].name;
+        std::string new_token = escape_spaces(dir_part + matches[0].name);
         if (matches[0].is_dir) {
             new_token.push_back('/');
         }

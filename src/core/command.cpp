@@ -737,7 +737,17 @@ static const char* parse_token(const char* line, char* out)
         return line;
     }
 
-    while (*line && *line != ' ') {
+    while (*line) {
+        if (*line == '\\') {
+            line++;
+            if (*line) {
+                *out++ = *line++;
+            }
+            continue;
+        }
+        if (*line == ' ') {
+            break;
+        }
         *out++ = *line++;
     }
     *out = 0;
