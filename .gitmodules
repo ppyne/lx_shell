@@ -1,3 +1,6 @@
 [submodule "lib/lx"]
 	path = lib/lx
 	url = https://github.com/ppyne/lx.git
+[submodule "lib/ESP8266Audio"]
+	path = lib/ESP8266Audio
+	url = git@github.com:earlephilhower/ESP8266Audio.git

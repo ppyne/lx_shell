@@ -14,6 +14,7 @@ Includes a terminal, a minimal vi (or nano) editor, core commands, and Lx script
 - Output redirection (`>`, `>>`), pipes (`|`), and `tee`
 - Screensaver + display sleep
 - Keyboard with CP437 extended glyphs and optional debug
+- Audio playback via ESP8266Audio (streaming MP3/WAV)
 
 ## Commands
 
@@ -69,6 +70,7 @@ screen_off_minutes=5
 ## Build and flash (PlatformIO)
 
 This project is built with [PlatformIO](https://platformio.org/).
+Audio playback relies on the [ESP8266Audio](https://github.com/earlephilhower/ESP8266Audio) library.
 
 1. Initialize submodules:
 

@@ -140,8 +140,18 @@ void setup()
     term_puts("╚═══════════════╝\n");*/
     term_prompt();
 
+    static char psram_msg[96];
+    if (psramFound()) {
+        snprintf(psram_msg, sizeof(psram_msg), "PSRAM: %lu bytes, free %lu bytes\n",
+            (unsigned long)ESP.getPsramSize(),
+            (unsigned long)ESP.getFreePsram());
+    } else {
+        snprintf(psram_msg, sizeof(psram_msg), "PSRAM: not found\n");
+    }
+
     Serial.println();
     Serial.println("UART/USB console ready");
+    Serial.print(psram_msg);
 }
 
 void loop()

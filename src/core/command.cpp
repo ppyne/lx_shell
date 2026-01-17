@@ -631,7 +631,9 @@ static std::string man_entry(const char* name)
          "  play [-v 0-100] <path>\n"
          "\n"
          "NOTES\n"
-         "  Press any key to stop playback.\n"},
+         "  Use fn+up / fn+down to adjust volume while playing.\n"
+         "  Press any other key to stop playback.\n"
+         "  Playback is streamed via ESP8266Audio and depends on SD read speed.\n"},
         {"brightness",
          "NAME\n"
          "  brightness - set display backlight level\n"
@@ -1277,8 +1279,8 @@ static bool command_exec_line(const char* line, bool allow_pipe)
         }
 
         auto spk_cfg = M5.Speaker.config();
-        spk_cfg.dma_buf_len = 1024;
-        spk_cfg.dma_buf_count = 16;
+        spk_cfg.dma_buf_len = 512;
+        spk_cfg.dma_buf_count = 48;
         spk_cfg.task_priority = 3;
         spk_cfg.task_pinned_core = 0;
         M5.Speaker.config(spk_cfg);
