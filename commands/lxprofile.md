@@ -17,4 +17,4 @@ Profiles reserve a minimum amount of free heap to reduce hard OOM crashes.
 - `balanced`: default reserve, good for most scripts
 - `power`: lowest reserve, maximum capacity (higher OOM risk)
 
-The default profile is stored in RAM only and resets to `balanced` on reboot.
+When an SD card is mounted, the value is saved to `/media/0/.lxscriptrc`.

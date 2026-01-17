@@ -8,15 +8,18 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <Arduino.h>
+#include <M5Cardputer.h>
 
 #include "fs/fs.h"
 #include "ui/terminal.h"
+#include "ui/keyboard.h"
 #include "lxsh_fs_bridge.h"
 #include "lxsh_exec_bridge.h"
 
 #include "../lib/lx/config.h"
 
 extern "C" {
+#include "ast.h"
 #include "env.h"
 #include "eval.h"
 #include "lexer.h"
@@ -72,7 +75,7 @@ enum LxProfile {
     LX_PROFILE_POWER
 };
 
-static LxProfile g_lx_profile = LX_PROFILE_BALANCED;
+static LxProfile g_lx_profile = LX_PROFILE_POWER;
 
 static void lx_apply_profile()
 {
@@ -141,6 +144,7 @@ static bool lx_run_script_internal(const char* path)
     lx_apply_profile();
     lx_set_output_cb(lx_output_cb);
     lx_error_clear();
+    lx_reset_extensions();
 
     Parser parser;
     lexer_init(&parser.lexer, source.c_str(), path);
@@ -150,6 +154,7 @@ static bool lx_run_script_internal(const char* path)
     AstNode* program = parse_program(&parser);
     if (!program || lx_has_error()) {
         lx_report_error();
+        ast_free(program);
         return false;
     }
 
@@ -183,13 +188,17 @@ static bool lx_run_script_internal(const char* path)
     lx_init_modules(global);
 
     EvalResult r = eval_program(program, global);
-    (void)r;
-
     if (lx_has_error()) {
         lx_report_error();
+        value_free(r.value);
+        env_free(global);
+        ast_free(program);
         return false;
     }
 
+    value_free(r.value);
+    env_free(global);
+    ast_free(program);
     return true;
 }
 
@@ -200,6 +209,15 @@ struct LxTaskArgs {
 };
 
 static TaskHandle_t g_lx_task_handle = NULL;
+#ifdef LX_TASK_STACK_SIZE
+static constexpr uint32_t kLxTaskStackWords =
+    (LX_TASK_STACK_SIZE + sizeof(StackType_t) - 1) / sizeof(StackType_t);
+#else
+static constexpr uint32_t kLxTaskStackWords =
+    (32768 + sizeof(StackType_t) - 1) / sizeof(StackType_t);
+#endif
+static StackType_t g_lx_task_stack[kLxTaskStackWords];
+static StaticTask_t g_lx_task_tcb;
 static volatile bool g_lx_script_active = false;
 static volatile bool g_lx_script_cancel = false;
 
@@ -250,28 +268,26 @@ bool lx_run_script(const char* path)
         return false;
     }
 
-    uint32_t stack_size = 0;
-#ifdef LX_TASK_STACK_SIZE
-    stack_size = LX_TASK_STACK_SIZE;
-#else
-    stack_size = 32768;
-#endif
-
-    BaseType_t ok = xTaskCreatePinnedToCore(
+    g_lx_task_handle = xTaskCreateStatic(
         lx_task_entry,
         "lx_task",
-        stack_size,
+        kLxTaskStackWords,
         args,
         1,
-        &g_lx_task_handle,
-        tskNO_AFFINITY);
-    if (ok != pdPASS) {
+        g_lx_task_stack,
+        &g_lx_task_tcb);
+    if (!g_lx_task_handle) {
         delete args;
         term_error("lx task failed");
         return false;
     }
 
-    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    while (ulTaskNotifyTake(pdTRUE, 0) == 0) {
+        M5.update();
+        M5Cardputer.update();
+        keyboard_poll();
+        vTaskDelay(1);
+    }
     bool result = args->result;
     delete args;
     return result;

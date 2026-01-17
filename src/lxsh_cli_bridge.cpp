@@ -12,13 +12,19 @@
 #include "lxsh_runtime.h"
 
 static QueueHandle_t g_lxsh_cli_queue = NULL;
+static StaticQueue_t g_lxsh_cli_queue_buf;
+static uint8_t g_lxsh_cli_queue_storage[64];
 
 static void lxsh_cli_ensure_queue()
 {
     if (g_lxsh_cli_queue) {
         return;
     }
-    g_lxsh_cli_queue = xQueueCreate(64, sizeof(uint8_t));
+    g_lxsh_cli_queue = xQueueCreateStatic(
+        64,
+        sizeof(uint8_t),
+        g_lxsh_cli_queue_storage,
+        &g_lxsh_cli_queue_buf);
 }
 
 void lxsh_cli_push_char(uint8_t c)

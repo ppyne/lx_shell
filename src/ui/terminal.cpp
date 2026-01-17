@@ -436,6 +436,21 @@ void term_putc(char c)
         return;
     }
 
+    if (c == '\r') {
+        cur_col = 0;
+        refresh_cursor();
+        return;
+    }
+
+    if (c == '\b') {
+        if (cur_col > 0) {
+            cur_col--;
+            buffer[cur_row][cur_col] = ' ';
+            refresh_cursor();
+        }
+        return;
+    }
+
     if (c == '\n') {
         cur_row++;
         cur_col = 0;

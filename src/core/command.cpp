@@ -597,7 +597,8 @@ static std::string man_entry(const char* name)
          "  power    - lowest reserve, maximum capacity (higher OOM risk)\n"
          "\n"
          "NOTES\n"
-         "  The default profile lives in RAM only and resets to balanced on reboot.\n"
+         "  The default profile is loaded from /media/0/.lxscriptrc when available.\n"
+         "  It defaults to power when no profile is configured.\n"
          "  Using --profile changes the profile for that run only.\n"},
         {"lxprofile",
          "NAME\n"
@@ -612,7 +613,7 @@ static std::string man_entry(const char* name)
          "  power    - lowest reserve, maximum capacity (higher OOM risk)\n"
          "\n"
          "NOTES\n"
-         "  The default profile lives in RAM only and resets to balanced on reboot.\n"},
+         "  When an SD card is mounted, the value is saved to /media/0/.lxscriptrc.\n"},
         {"led",
          "NAME\n"
          "  led - control the RGB LED\n"
@@ -1804,11 +1805,14 @@ static bool command_exec_line(const char* line, bool allow_pipe)
                 term_error("missing operand");
                 return false;
             }
+            std::string prev_profile = lx_get_profile_name();
             if (!lx_set_profile(arg2)) {
                 term_error("bad profile");
                 return false;
             }
-            return lx_run_script(arg3);
+            bool ok = lx_run_script(arg3);
+            lx_set_profile(prev_profile.c_str());
+            return ok;
         }
         return lx_run_script(arg1);
     }
@@ -1844,6 +1848,8 @@ static bool command_exec_line(const char* line, bool allow_pipe)
             term_error("bad profile");
             return false;
         }
+        settings_set_lx_profile(lx_get_profile_name());
+        settings_save_script_if_available();
         term_puts("profile set to ");
         term_puts(lx_get_profile_name());
         term_putc('\n');
