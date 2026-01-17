@@ -17,8 +17,10 @@
 #include <vector>
 #include <algorithm>
 #include <ctype.h>
+#include <stdio.h>
 #include <Arduino.h>
 #include <M5Unified.h>
+#include "ff.h"
 #include <utility/led/LED_Strip_Class.hpp>
 #include <driver/rmt.h>
 #include <driver/gpio.h>
@@ -38,6 +40,22 @@ static std::string trim_copy(const std::string& in)
         end--;
     }
     return in.substr(start, end - start);
+}
+
+static void format_human_size(uint64_t bytes, char* out, size_t out_sz)
+{
+    const char* units[] = { "B", "K", "M", "G", "T" };
+    double value = (double)bytes;
+    size_t unit = 0;
+    while (value >= 1024.0 && unit < 4) {
+        value /= 1024.0;
+        unit++;
+    }
+    if (unit == 0) {
+        snprintf(out, out_sz, "%llu%s", (unsigned long long)bytes, units[unit]);
+        return;
+    }
+    snprintf(out, out_sz, "%.1f%s", value, units[unit]);
 }
 
 static bool ctrl_c_pressed()
@@ -513,6 +531,15 @@ static std::string man_entry(const char* name)
          "\n"
          "SYNOPSIS\n"
          "  umount\n"},
+        {"df",
+         "NAME\n"
+         "  df - show mounted filesystems\n"
+         "\n"
+         "SYNOPSIS\n"
+         "  df -h\n"
+         "\n"
+         "NOTES\n"
+         "  Reports size, used, available, and mount point.\n"},
         {"mkdir",
          "NAME\n"
          "  mkdir - create directory\n"
@@ -1051,6 +1078,53 @@ static bool command_exec_line(const char* line, bool allow_pipe)
 
         fs_umount();
         term_puts("SDCard unmounted\n");
+        return true;
+    }
+
+    // --------------------------------------------------------
+    // df -h
+    // --------------------------------------------------------
+    if (strcmp(cmd, "df") == 0) {
+        if (*arg1 && strcmp(arg1, "-h") != 0) {
+            term_error("usage: df -h");
+            return false;
+        }
+
+        term_puts("Filesystem  Size  Used  Avail  Mounted\n");
+        if (!fs_sd_mounted()) {
+            term_puts("(none)\n");
+            return true;
+        }
+
+        FATFS* fs = nullptr;
+        DWORD free_clust = 0;
+        FRESULT res = f_getfree("0:", &free_clust, &fs);
+        if (res != FR_OK || !fs) {
+            term_error("cannot stat /media/0");
+            return false;
+        }
+
+#if FF_MAX_SS != FF_MIN_SS
+        uint32_t sector_size = fs->ssize;
+#else
+        uint32_t sector_size = FF_MAX_SS;
+#endif
+
+        uint64_t total = (uint64_t)(fs->n_fatent - 2) * fs->csize * sector_size;
+        uint64_t avail = (uint64_t)free_clust * fs->csize * sector_size;
+        uint64_t used = total - avail;
+
+        char size_str[16];
+        char used_str[16];
+        char avail_str[16];
+        format_human_size(total, size_str, sizeof(size_str));
+        format_human_size(used, used_str, sizeof(used_str));
+        format_human_size(avail, avail_str, sizeof(avail_str));
+
+        char line[128];
+        snprintf(line, sizeof(line), "SDCard0    %5s %5s %5s  /media/0\n",
+            size_str, used_str, avail_str);
+        term_puts(line);
         return true;
     }
 

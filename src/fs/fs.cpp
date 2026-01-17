@@ -329,6 +329,7 @@ static void format_size(uint32_t size, char* out, size_t out_sz)
 
 static const char* k_bin_names[] = {
     "ls", "pwd", "cd", "mount", "umount",
+    "df",
     "mkdir", "rmdir", "cp", "mv", "rm",
     "vi", "nano", "touch", "cat",
     "view", "slideshow", "play", "led",
