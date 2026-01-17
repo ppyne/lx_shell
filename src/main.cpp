@@ -8,13 +8,11 @@
 #include "ui/screensaver.h"
 #include "fs/fs.h"
 #include "editor/editor.h"
+#include "core/settings.h"
 
 namespace {
-static const uint32_t kSaverStartMs = 2 * 60 * 1000UL;
-static const uint32_t kScreenOffMs = 5 * 60 * 1000UL;
 static const uint32_t kSaverFrameMs = 60;
 static const uint8_t kSaverStars = 40;
-static const uint8_t kScreenBrightness = 255;
 static const uint16_t kStarColors[] = {
     TFT_NAVY, TFT_DARKGREEN, TFT_DARKCYAN, TFT_MAROON, TFT_PURPLE, TFT_OLIVE,
     TFT_LIGHTGREY, TFT_LIGHTGRAY, TFT_DARKGREY, TFT_DARKGRAY, TFT_BLUE,
@@ -63,7 +61,7 @@ static void screensaver_stop()
 {
     saver_active = false;
     screen_off = false;
-    M5.Display.setBrightness(kScreenBrightness);
+    M5.Display.setBrightness(settings_get_brightness());
     screen_clear();
     if (editor_is_active()) {
         editor_redraw();
@@ -123,6 +121,8 @@ void setup()
 
     screen_init();       // initialise LovyanGFX / écran
     bool mounted = fs_mount();
+    settings_init();
+    M5.Display.setBrightness(settings_get_brightness());
     term_init();         // initialise le terminal
     keyboard_init();     // initialise le clavier
     //fs_init();
@@ -160,16 +160,16 @@ void loop()
             screensaver_stop();
         }
     } else {
-        if ((saver_active || screen_off) && idle_ms < kSaverStartMs) {
+        if ((saver_active || screen_off) && idle_ms < settings_get_saver_start_ms()) {
             screensaver_stop();
         }
 
-        if (!screen_off && idle_ms >= kScreenOffMs) {
+        if (!screen_off && idle_ms >= settings_get_screen_off_ms()) {
             screensaver_off();
             return;
         }
 
-        if (!saver_active && idle_ms >= kSaverStartMs) {
+        if (!saver_active && idle_ms >= settings_get_saver_start_ms()) {
             screensaver_start();
         }
 

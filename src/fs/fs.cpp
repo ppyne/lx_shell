@@ -331,9 +331,9 @@ static const char* k_bin_names[] = {
     "ls", "pwd", "cd", "mount", "umount",
     "mkdir", "rmdir", "cp", "mv", "rm",
     "vi", "nano", "touch", "cat",
-    "view", "slideshow", "play",
+    "view", "slideshow", "play", "led",
     "lx", "lxprofile", "more", "less", "find", "tee",
-    "clear", "reset", "battery", "shutdown",
+    "clear", "reset", "battery", "shutdown", "brightness",
     "man",
     "uptime"
 };

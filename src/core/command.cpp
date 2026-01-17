@@ -9,6 +9,7 @@
 #include "lx_runner.h"
 #include "audio/mp3_player.h"
 #include "audio/wav_player.h"
+#include "core/settings.h"
 
 #include <string.h>
 #include <string>
@@ -17,6 +18,12 @@
 #include <ctype.h>
 #include <Arduino.h>
 #include <M5Unified.h>
+#include <utility/led/LED_Strip_Class.hpp>
+#include <driver/rmt.h>
+#include <driver/gpio.h>
+#include <esp_rom_sys.h>
+#include <freertos/FreeRTOS.h>
+#include <esp_cpu.h>
 #include <M5Cardputer.h>
 
 static std::string trim_copy(const std::string& in)
@@ -56,6 +63,150 @@ static bool view_any_key_pressed()
     if (!st.word.empty()) return true;
     if (st.enter || st.del || st.tab) return true;
     if (st.fn || st.shift || st.ctrl || st.opt || st.alt) return true;
+    return false;
+}
+
+static bool led_use_rmt = false;
+static bool led_rmt_ready = false;
+static uint8_t led_rmt_intensity = 255;
+static rmt_channel_t led_rmt_channel = RMT_CHANNEL_0;
+static bool led_use_bitbang = false;
+static int led_bitbang_pin = -1;
+static portMUX_TYPE led_bitbang_mux = portMUX_INITIALIZER_UNLOCKED;
+static uint32_t led_cpu_mhz = 0;
+
+static bool led_rmt_init(int pin)
+{
+    if (led_rmt_ready) {
+        return true;
+    }
+    const rmt_channel_t channels[] = {
+        RMT_CHANNEL_0, RMT_CHANNEL_1, RMT_CHANNEL_2, RMT_CHANNEL_3
+    };
+    for (rmt_channel_t ch : channels) {
+        rmt_config_t config;
+        memset(&config, 0, sizeof(config));
+        config.rmt_mode = RMT_MODE_TX;
+        config.channel = ch;
+        config.gpio_num = (gpio_num_t)pin;
+        config.mem_block_num = 1;
+        config.clk_div = 2;
+        config.tx_config.loop_en = false;
+        config.tx_config.carrier_en = false;
+        config.tx_config.idle_output_en = true;
+        config.tx_config.idle_level = RMT_IDLE_LEVEL_LOW;
+        if (rmt_config(&config) != ESP_OK) {
+            continue;
+        }
+        if (rmt_driver_install(config.channel, 0, 0) != ESP_OK) {
+            continue;
+        }
+        led_rmt_channel = ch;
+        led_rmt_ready = true;
+        return true;
+    }
+    return false;
+}
+
+static void led_rmt_send(uint8_t r, uint8_t g, uint8_t b)
+{
+    if (!led_rmt_ready) {
+        return;
+    }
+    if (led_rmt_intensity < 255) {
+        r = (uint8_t)((r * led_rmt_intensity) / 255);
+        g = (uint8_t)((g * led_rmt_intensity) / 255);
+        b = (uint8_t)((b * led_rmt_intensity) / 255);
+    }
+
+    const uint8_t grb[3] = { g, r, b };
+    rmt_item32_t items[24];
+    const uint16_t t0h = 14;
+    const uint16_t t0l = 34;
+    const uint16_t t1h = 28;
+    const uint16_t t1l = 24;
+    int idx = 0;
+    for (int byte = 0; byte < 3; ++byte) {
+        uint8_t v = grb[byte];
+        for (int bit = 7; bit >= 0; --bit) {
+            bool one = v & (1u << bit);
+            items[idx].level0 = 1;
+            items[idx].duration0 = one ? t1h : t0h;
+            items[idx].level1 = 0;
+            items[idx].duration1 = one ? t1l : t0l;
+            idx++;
+        }
+    }
+    rmt_write_items(led_rmt_channel, items, 24, true);
+}
+
+static bool led_bitbang_init(int pin)
+{
+    if (pin < 0) {
+        return false;
+    }
+    gpio_reset_pin((gpio_num_t)pin);
+    gpio_set_direction((gpio_num_t)pin, GPIO_MODE_OUTPUT);
+    gpio_set_level((gpio_num_t)pin, 0);
+    led_bitbang_pin = pin;
+    led_cpu_mhz = (uint32_t)ESP.getCpuFreqMHz();
+    return true;
+}
+
+static inline void led_delay_ns(uint32_t ns)
+{
+    if (led_cpu_mhz == 0) {
+        return;
+    }
+    uint32_t cycles = (ns * led_cpu_mhz) / 1000;
+    uint32_t start = esp_cpu_get_ccount();
+    while ((uint32_t)(esp_cpu_get_ccount() - start) < cycles) {
+    }
+}
+
+static void led_bitbang_send(uint8_t r, uint8_t g, uint8_t b)
+{
+    if (led_bitbang_pin < 0) {
+        return;
+    }
+    if (led_rmt_intensity < 255) {
+        r = (uint8_t)((r * led_rmt_intensity) / 255);
+        g = (uint8_t)((g * led_rmt_intensity) / 255);
+        b = (uint8_t)((b * led_rmt_intensity) / 255);
+    }
+    const uint8_t grb[3] = { g, r, b };
+    portENTER_CRITICAL(&led_bitbang_mux);
+    for (int byte = 0; byte < 3; ++byte) {
+        uint8_t v = grb[byte];
+        for (int bit = 7; bit >= 0; --bit) {
+            bool one = v & (1u << bit);
+            gpio_set_level((gpio_num_t)led_bitbang_pin, 1);
+            led_delay_ns(one ? 700 : 350);
+            gpio_set_level((gpio_num_t)led_bitbang_pin, 0);
+            led_delay_ns(one ? 600 : 900);
+        }
+    }
+    ets_delay_us(80);
+    portEXIT_CRITICAL(&led_bitbang_mux);
+}
+
+static bool ensure_led_ready()
+{
+    led_use_rmt = false;
+    led_use_bitbang = false;
+    int pin = M5.getPin(m5::pin_name_t::rgb_led);
+    if (pin < 0) {
+        pin = 21;
+    }
+
+    if (led_rmt_init(pin)) {
+        led_use_rmt = true;
+        return true;
+    }
+    if (led_bitbang_init(pin)) {
+        led_use_bitbang = true;
+        return true;
+    }
     return false;
 }
 
@@ -103,6 +254,20 @@ static void view_wait_for_key_release()
         M5Cardputer.Keyboard.updateKeyList();
         M5Cardputer.Keyboard.updateKeysState();
         if (!view_any_key_pressed()) {
+            break;
+        }
+        delay(10);
+    }
+}
+
+static void view_wait_for_key_release_no_fn()
+{
+    for (;;) {
+        M5.update();
+        M5Cardputer.update();
+        M5Cardputer.Keyboard.updateKeyList();
+        M5Cardputer.Keyboard.updateKeysState();
+        if (!view_any_key_pressed_no_fn()) {
             break;
         }
         delay(10);
@@ -373,6 +538,29 @@ static std::string man_entry(const char* name)
          "\n"
          "NOTES\n"
          "  The default profile lives in RAM only and resets to balanced on reboot.\n"},
+        {"led",
+         "NAME\n"
+         "  led - control the RGB LED\n"
+         "\n"
+         "SYNOPSIS\n"
+         "  led -c #RRGGBB [-i 0-255]\n"
+         "  led -R <0-255> -G <0-255> -B <0-255> [-i 0-255]\n"
+         "  led -b <ms> (-c #RRGGBB | -R <n> -G <n> -B <n>) [-i 0-255]\n"
+         "  led -m <ms> [-i 0-255]\n"
+         "\n"
+         "OPTIONS\n"
+         "  -c  set color as hex (example: #ff8800)\n"
+         "  -R  red component (0-255)\n"
+         "  -G  green component (0-255)\n"
+         "  -B  blue component (0-255)\n"
+         "  -b  blink period in milliseconds\n"
+         "  -m  cycle hue over a period in milliseconds\n"
+         "  -i  intensity / brightness (0-255)\n"
+         "\n"
+         "NOTES\n"
+         "  -m cannot be combined with -b or explicit colors.\n"
+         "  Press any key to return to the shell.\n"
+         "  The display backlight is forced ON while running.\n"},
         {"more",
          "NAME\n"
          "  more - page through text\n"
@@ -444,6 +632,15 @@ static std::string man_entry(const char* name)
          "\n"
          "NOTES\n"
          "  Press any key to stop playback.\n"},
+        {"brightness",
+         "NAME\n"
+         "  brightness - set display backlight level\n"
+         "\n"
+         "SYNOPSIS\n"
+         "  brightness <7-255>\n"
+         "\n"
+         "NOTES\n"
+         "  When an SD card is mounted, the value is saved to /media/0/.lxshellrc.\n"},
         {"nano",
          "NAME\n"
          "  nano - minimal editor (nano-style)\n"
@@ -559,6 +756,20 @@ static void parse_line(const char* line, char* cmd, char* arg1, char* arg2, char
     p = parse_token(p, arg1);
     p = parse_token(p, arg2);
     parse_token(p, arg3);
+}
+
+static void parse_tokens(const char* line, std::vector<std::string>& out)
+{
+    out.clear();
+    char token[128];
+    const char* p = line;
+    for (;;) {
+        p = parse_token(p, token);
+        if (!token[0]) {
+            break;
+        }
+        out.emplace_back(token);
+    }
 }
 
 // ------------------------------------------------------------
@@ -750,6 +961,8 @@ static bool command_exec_line(const char* line, bool allow_pipe)
 
         if (fs_mount()) {
             term_puts("SDCard 0 mounted at /media/0\n");
+            settings_load_if_available();
+            M5.Display.setBrightness(settings_get_brightness());
         } else {
             term_error("no sdcard");
             return false;
@@ -1085,11 +1298,318 @@ static bool command_exec_line(const char* line, bool allow_pipe)
     }
 
     // --------------------------------------------------------
+    // led [options]
+    // --------------------------------------------------------
+    if (strcmp(cmd, "led") == 0) {
+        std::vector<std::string> tokens;
+        parse_tokens(line, tokens);
+
+        uint8_t prev_brightness = M5.Display.getBrightness();
+        M5.Display.setBrightness(255);
+
+        int blink_ms = -1;
+        int melt_ms = -1;
+        int intensity = -1;
+        int r = -1;
+        int g = -1;
+        int b = -1;
+        bool have_color = false;
+        bool have_hex = false;
+
+        auto usage = [&]() {
+            term_error("usage: led -c #RRGGBB | -R n -G n -B n | -m ms");
+        };
+
+        auto parse_int = [](const char* s, int& out) -> bool {
+            if (!s || !*s) {
+                return false;
+            }
+            char* end = nullptr;
+            long val = strtol(s, &end, 10);
+            if (end == s || *end != '\0') {
+                return false;
+            }
+            out = (int)val;
+            return true;
+        };
+
+        auto parse_u8 = [&](const char* s, int& out) -> bool {
+            int v = 0;
+            if (!parse_int(s, v) || v < 0 || v > 255) {
+                return false;
+            }
+            out = v;
+            return true;
+        };
+
+        auto parse_hex = [&](const char* s, int& out_r, int& out_g, int& out_b) -> bool {
+            if (!s) {
+                return false;
+            }
+            if (s[0] == '#') {
+                s++;
+            }
+            if (strlen(s) != 6) {
+                return false;
+            }
+            unsigned int v = 0;
+            if (sscanf(s, "%06x", &v) != 1) {
+                return false;
+            }
+            out_r = (v >> 16) & 0xFF;
+            out_g = (v >> 8) & 0xFF;
+            out_b = v & 0xFF;
+            return true;
+        };
+
+        for (size_t i = 1; i < tokens.size(); i++) {
+            const std::string& opt = tokens[i];
+            if (opt == "-b") {
+                if (i + 1 >= tokens.size() || !parse_int(tokens[i + 1].c_str(), blink_ms)) {
+                    usage();
+                    return false;
+                }
+                i++;
+                continue;
+            }
+            if (opt == "-m") {
+                if (i + 1 >= tokens.size() || !parse_int(tokens[i + 1].c_str(), melt_ms)) {
+                    usage();
+                    return false;
+                }
+                i++;
+                continue;
+            }
+            if (opt == "-i") {
+                if (i + 1 >= tokens.size() || !parse_u8(tokens[i + 1].c_str(), intensity)) {
+                    usage();
+                    return false;
+                }
+                i++;
+                continue;
+            }
+            if (opt == "-c") {
+                if (i + 1 >= tokens.size() ||
+                    !parse_hex(tokens[i + 1].c_str(), r, g, b)) {
+                    usage();
+                    return false;
+                }
+                have_color = true;
+                have_hex = true;
+                i++;
+                continue;
+            }
+            if (opt == "-R") {
+                if (i + 1 >= tokens.size() || !parse_u8(tokens[i + 1].c_str(), r)) {
+                    usage();
+                    return false;
+                }
+                have_color = true;
+                i++;
+                continue;
+            }
+            if (opt == "-G") {
+                if (i + 1 >= tokens.size() || !parse_u8(tokens[i + 1].c_str(), g)) {
+                    usage();
+                    return false;
+                }
+                have_color = true;
+                i++;
+                continue;
+            }
+            if (opt == "-B") {
+                if (i + 1 >= tokens.size() || !parse_u8(tokens[i + 1].c_str(), b)) {
+                    usage();
+                    return false;
+                }
+                have_color = true;
+                i++;
+                continue;
+            }
+            term_error("unknown option");
+            return false;
+        }
+
+        if (blink_ms == 0 || melt_ms == 0) {
+            usage();
+            return false;
+        }
+        if (blink_ms > 0 && melt_ms > 0) {
+            usage();
+            return false;
+        }
+        if (melt_ms > 0 && have_color) {
+            usage();
+            return false;
+        }
+        if (have_hex && (r < 0 || g < 0 || b < 0)) {
+            usage();
+            return false;
+        }
+        if (!melt_ms && (!have_color || r < 0 || g < 0 || b < 0)) {
+            usage();
+            return false;
+        }
+
+        if (!ensure_led_ready()) {
+            M5.Display.setBrightness(prev_brightness);
+            term_error("led unavailable");
+            return false;
+        }
+        if (intensity >= 0) {
+            if (led_use_rmt || led_use_bitbang) {
+                led_rmt_intensity = (uint8_t)intensity;
+            } else {
+                M5.Led.setBrightness((uint8_t)intensity);
+            }
+        }
+
+        auto update_input = []() {
+            M5.update();
+            M5Cardputer.update();
+            M5Cardputer.Keyboard.updateKeyList();
+            M5Cardputer.Keyboard.updateKeysState();
+        };
+
+        auto set_rgb = [&](int rr, int gg, int bb) {
+            if (led_use_rmt) {
+                led_rmt_send((uint8_t)rr, (uint8_t)gg, (uint8_t)bb);
+            } else if (led_use_bitbang) {
+                led_bitbang_send((uint8_t)rr, (uint8_t)gg, (uint8_t)bb);
+            } else {
+                M5.Led.setAllColor((uint8_t)rr, (uint8_t)gg, (uint8_t)bb);
+            }
+        };
+
+        uint32_t exit_arm_ms = millis() + 200;
+
+        auto hue_to_rgb = [](uint16_t hue, uint8_t& out_r, uint8_t& out_g, uint8_t& out_b) {
+            uint16_t region = (hue / 60) % 6;
+            uint16_t rem = (uint16_t)((hue % 60) * 255 / 60);
+            switch (region) {
+            case 0:
+                out_r = 255;
+                out_g = (uint8_t)rem;
+                out_b = 0;
+                break;
+            case 1:
+                out_r = (uint8_t)(255 - rem);
+                out_g = 255;
+                out_b = 0;
+                break;
+            case 2:
+                out_r = 0;
+                out_g = 255;
+                out_b = (uint8_t)rem;
+                break;
+            case 3:
+                out_r = 0;
+                out_g = (uint8_t)(255 - rem);
+                out_b = 255;
+                break;
+            case 4:
+                out_r = (uint8_t)rem;
+                out_g = 0;
+                out_b = 255;
+                break;
+            default:
+                out_r = 255;
+                out_g = 0;
+                out_b = (uint8_t)(255 - rem);
+                break;
+            }
+        };
+
+        if (melt_ms > 0) {
+            uint32_t period = (uint32_t)melt_ms;
+            view_wait_for_key_release_no_fn();
+            for (;;) {
+                update_input();
+                if (millis() >= exit_arm_ms && view_any_key_pressed_no_fn()) {
+                    break;
+                }
+                uint32_t now = millis();
+                uint16_t hue = (uint16_t)((now % period) * 360UL / period);
+                uint8_t rr = 0;
+                uint8_t gg = 0;
+                uint8_t bb = 0;
+                hue_to_rgb(hue, rr, gg, bb);
+                set_rgb(rr, gg, bb);
+                delay(50);
+            }
+            set_rgb(0, 0, 0);
+            M5.Display.setBrightness(prev_brightness);
+            return true;
+        }
+
+        if (blink_ms > 0) {
+            uint32_t half = (uint32_t)blink_ms / 2U;
+            if (half == 0) {
+                half = 1;
+            }
+            bool on = true;
+            uint32_t next_tick = millis() + half;
+            set_rgb(r, g, b);
+            view_wait_for_key_release_no_fn();
+            for (;;) {
+                update_input();
+                if (millis() >= exit_arm_ms && view_any_key_pressed_no_fn()) {
+                    break;
+                }
+                uint32_t now = millis();
+                if ((int32_t)(now - next_tick) >= 0) {
+                    on = !on;
+                    next_tick = now + half;
+                    if (on) {
+                        set_rgb(r, g, b);
+                    } else {
+                        set_rgb(0, 0, 0);
+                    }
+                }
+                delay(10);
+            }
+            set_rgb(0, 0, 0);
+            M5.Display.setBrightness(prev_brightness);
+            return true;
+        }
+
+        set_rgb(r, g, b);
+        view_wait_for_key_release_no_fn();
+        for (;;) {
+            update_input();
+            if (millis() >= exit_arm_ms && view_any_key_pressed_no_fn()) {
+                break;
+            }
+            delay(10);
+        }
+        set_rgb(0, 0, 0);
+        M5.Display.setBrightness(prev_brightness);
+        return true;
+    }
+
+    // --------------------------------------------------------
     // nano [path]
     // --------------------------------------------------------
     if (strcmp(cmd, "nano") == 0) {
         const char* path = (*arg1) ? arg1 : "";
         editor_open_with_mode(path, true);
+        return true;
+    }
+
+    // --------------------------------------------------------
+    // brightness <7-255>
+    // --------------------------------------------------------
+    if (strcmp(cmd, "brightness") == 0) {
+        if (!*arg1) {
+            term_error("missing operand");
+            return false;
+        }
+        int level = atoi(arg1);
+        if (level < 7) level = 7;
+        if (level > 255) level = 255;
+        M5.Display.setBrightness((uint8_t)level);
+        settings_set_brightness((uint8_t)level);
+        settings_save_if_available();
         return true;
     }
 

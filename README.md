@@ -18,11 +18,13 @@ Includes a terminal, a minimal vi (or nano) editor, core commands, and Lx script
 ## Commands
 
 - [battery](commands/battery.md) - battery status
+- [brightness](commands/brightness.md) - set display brightness
 - [cat](commands/cat.md) - print file contents
 - [cd](commands/cd.md) - change directory
 - [clear](commands/clear.md) - clear terminal
 - [cp](commands/cp.md) - copy file
 - [find](commands/find.md) - search files
+- [led](commands/led.md) - control the RGB LED
 - [less](commands/less.md) - alias for `more`
 - [ls](commands/ls.md) - list directory contents
 - [lx](commands/lx.md) - run a Lx script
@@ -33,6 +35,7 @@ Includes a terminal, a minimal vi (or nano) editor, core commands, and Lx script
 - [mount](commands/mount.md) - mount SD card
 - [mv](commands/mv.md) - move/rename file
 - [nano](commands/nano.md) - minimal editor (nano-style)
+- [play](commands/play.md) - audio player (WAV/MP3)
 - [pwd](commands/pwd.md) - print working directory
 - [reset](commands/reset.md) - alias for `clear`
 - [rm](commands/rm.md) - remove file
@@ -43,8 +46,20 @@ Includes a terminal, a minimal vi (or nano) editor, core commands, and Lx script
 - [touch](commands/touch.md) - create/update file
 - [umount](commands/umount.md) - unmount SD card
 - [view](commands/view.md) - image viewer (PNG/JPEG)
-- [play](commands/play.md) - audio player (WAV/MP3)
 - [vi](commands/vi.md) - minimal editor
+
+## Preferences
+
+When an SD card is mounted, LX shell stores preferences in `/media/0/.lxshellrc`.
+Without an SD card, preferences live in RAM and are lost on reboot.
+
+Supported keys:
+
+```
+brightness=100
+screensaver_minutes=2
+screen_off_minutes=5
+```
 
 ## Target hardware
 
