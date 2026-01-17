@@ -511,8 +511,8 @@ void term_enter()
 
     term_putc('\n');
 
-    bool ok = command_exec(current_line.c_str());
-    if (ok) {
+    command_exec(current_line.c_str());
+    if (!current_line.empty()) {
         history_append(current_line);
     }
 
