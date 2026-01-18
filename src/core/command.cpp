@@ -897,6 +897,8 @@ static void parse_tokens(const char* line, std::vector<std::string>& out)
 // Exécution commande
 // ------------------------------------------------------------
 
+static int last_status = 0;
+
 static bool command_exec_line(const char* line, bool allow_pipe)
 {
     static bool rm_pending = false;
@@ -2001,7 +2003,13 @@ static bool command_exec_line(const char* line, bool allow_pipe)
             if (!first) {
                 term_putc(' ');
             }
-            term_puts(tokens[idx].c_str());
+            if (tokens[idx] == "$?") {
+                char status_buf[16];
+                snprintf(status_buf, sizeof(status_buf), "%d", last_status);
+                term_puts(status_buf);
+            } else {
+                term_puts(tokens[idx].c_str());
+            }
             first = false;
         }
         if (newline) {
@@ -2181,5 +2189,7 @@ static bool command_exec_line(const char* line, bool allow_pipe)
 
 bool command_exec(const char* line)
 {
-    return command_exec_line(line, true);
+    bool ok = command_exec_line(line, true);
+    last_status = ok ? 0 : 1;
+    return ok;
 }
