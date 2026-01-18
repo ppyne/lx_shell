@@ -109,6 +109,20 @@ lx scripts/lx_stress_test_progressive.lx > output.txt
   matches exist, they are printed space-separated and the input line is restored.
 - `lxprofile` is stored in RAM only; the default is `balanced` and it resets on reboot.
 
+## Virtual devices
+
+LX shell exposes a few virtual device nodes under `/dev`:
+
+- `/dev/console`: writes to the UART/USB console (VSCode monitor).
+- `/dev/stdout`: writes to the on-screen terminal.
+- `/dev/stderr`: writes to the on-screen terminal using the error color.
+- `/dev/tty`: alias of `/dev/stdout`.
+- `/dev/kmsg`: alias of `/dev/console`.
+- `/dev/full`: always fails writes ("no space left").
+- `/dev/zero`: produces a short hex sample of zero bytes when read.
+- `/dev/random` and `/dev/urandom`: produce short hex samples of random bytes when read.
+- `/dev/null`: discards all output.
+
 ## Lx profiles
 
 The Lx runtime supports memory profiles:

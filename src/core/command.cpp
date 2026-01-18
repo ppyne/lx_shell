@@ -743,6 +743,19 @@ static std::string man_entry(const char* name)
          "\n"
          "NOTES\n"
          "  Remaining time is an estimate based on fixed defaults.\n"},
+        {"free",
+         "NAME\n"
+         "  free - show memory usage\n"
+         "\n"
+         "SYNOPSIS\n"
+         "  free\n"
+         "  free -h\n"},
+        {"echo",
+         "NAME\n"
+         "  echo - print text\n"
+         "\n"
+         "SYNOPSIS\n"
+         "  echo [-n] [text]\n"},
         {"clear",
          "NAME\n"
          "  clear - clear the screen\n"
@@ -756,7 +769,14 @@ static std::string man_entry(const char* name)
          "\n"
          "SYNOPSIS\n"
          "  shutdown -h\n"
-         "  shutdown -r\n"},
+         "  shutdown -r\n"
+         "  reboot\n"},
+        {"reboot",
+         "NAME\n"
+         "  reboot - restart now\n"
+         "\n"
+         "SYNOPSIS\n"
+         "  reboot\n"},
         {"man",
          "NAME\n"
          "  man - show command help\n"
@@ -779,6 +799,19 @@ static std::string to_cp437(const std::string& utf8)
     std::vector<char> buf(utf8.size() + 1);
     size_t len = utf8_to_cp437(utf8.c_str(), buf.data(), buf.size());
     return std::string(buf.data(), len);
+}
+
+static void format_bytes_human(uint64_t bytes, char* out, size_t out_sz)
+{
+    const char units[] = { 'B', 'K', 'M', 'G' };
+    uint64_t value = bytes;
+    int unit_idx = 0;
+    while (value >= 1024 && unit_idx < 3) {
+        value /= 1024;
+        unit_idx++;
+    }
+    snprintf(out, out_sz, "%llu%c", static_cast<unsigned long long>(value),
+             units[unit_idx]);
 }
 
 // ------------------------------------------------------------
@@ -1928,6 +1961,56 @@ static bool command_exec_line(const char* line, bool allow_pipe)
     }
 
     // --------------------------------------------------------
+    // free [-h]
+    // --------------------------------------------------------
+    if (strcmp(cmd, "free") == 0) {
+        if (*arg1 && strcmp(arg1, "-h") != 0) {
+            term_error("bad option");
+            return false;
+        }
+        size_t total = ESP.getHeapSize();
+        size_t free = ESP.getFreeHeap();
+        size_t used = (total > free) ? (total - free) : 0;
+        char total_s[16];
+        char used_s[16];
+        char free_s[16];
+        char buf[96];
+        format_bytes_human(total, total_s, sizeof(total_s));
+        format_bytes_human(used, used_s, sizeof(used_s));
+        format_bytes_human(free, free_s, sizeof(free_s));
+        term_puts("       total  used  free\n");
+        snprintf(buf, sizeof(buf), "Mem:   %s  %s  %s\n", total_s, used_s, free_s);
+        term_puts(buf);
+        return true;
+    }
+
+    // --------------------------------------------------------
+    // echo [-n] [text]
+    // --------------------------------------------------------
+    if (strcmp(cmd, "echo") == 0) {
+        std::vector<std::string> tokens;
+        parse_tokens(line, tokens);
+        size_t idx = 1;
+        bool newline = true;
+        if (tokens.size() > 1 && tokens[1] == "-n") {
+            newline = false;
+            idx = 2;
+        }
+        bool first = true;
+        for (; idx < tokens.size(); idx++) {
+            if (!first) {
+                term_putc(' ');
+            }
+            term_puts(tokens[idx].c_str());
+            first = false;
+        }
+        if (newline) {
+            term_putc('\n');
+        }
+        return true;
+    }
+
+    // --------------------------------------------------------
     // shutdown [-h|-r]
     // --------------------------------------------------------
     if (strcmp(cmd, "shutdown") == 0) {
@@ -1944,6 +2027,15 @@ static bool command_exec_line(const char* line, bool allow_pipe)
         }
         term_error("bad option");
         return false;
+    }
+
+    // --------------------------------------------------------
+    // reboot
+    // --------------------------------------------------------
+    if (strcmp(cmd, "reboot") == 0) {
+        term_puts("Restarting...\n");
+        ESP.restart();
+        return true;
     }
 
     // --------------------------------------------------------

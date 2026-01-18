@@ -479,6 +479,24 @@ void term_puts(const char *s)
     }
 }
 
+void term_write_bytes(const char* data, size_t len)
+{
+    for (size_t i = 0; i < len; i++) {
+        term_putc(data[i]);
+    }
+}
+
+void term_write_bytes_error(const char* data, size_t len)
+{
+    uint16_t prev = current_fg;
+    current_fg = default_error;
+    line_color[cur_row] = current_fg;
+    for (size_t i = 0; i < len; i++) {
+        term_putc(data[i]);
+    }
+    current_fg = prev;
+}
+
 // ------------------------------------------------------------
 // ENTRÉE UTILISATEUR
 // ------------------------------------------------------------
@@ -526,10 +544,10 @@ void term_enter()
 
     term_putc('\n');
 
-    command_exec(current_line.c_str());
     if (!current_line.empty()) {
         history_append(current_line);
     }
+    command_exec(current_line.c_str());
 
     current_line.clear();
     history_index = -1;

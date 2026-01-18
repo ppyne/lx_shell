@@ -8,3 +8,7 @@ Halt or restart the device.
 shutdown -h
 shutdown -r
 ```
+
+## Notes
+
+`reboot` is an alias for `shutdown -r`.

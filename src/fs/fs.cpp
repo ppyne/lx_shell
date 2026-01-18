@@ -10,6 +10,8 @@
 #include <string>
 #include <algorithm>
 #include <time.h>
+#include <Arduino.h>
+#include <esp_system.h>
 #include "ff.h"
 
 #include "ui/terminal.h"
@@ -28,6 +30,52 @@ static char cwd[128] = "/";
 static bool path_eq(const char* a, const char* b)
 {
     return strcmp(a, b) == 0;
+}
+
+static const char* k_dev_entries[] = {
+    "console",
+    "stdout",
+    "stderr",
+    "tty",
+    "kmsg",
+    "full",
+    "zero",
+    "random",
+    "urandom",
+    "null"
+};
+
+static bool dev_entry_has(const char* name)
+{
+    if (!name || !*name) {
+        return false;
+    }
+    for (size_t i = 0; i < sizeof(k_dev_entries) / sizeof(k_dev_entries[0]); i++) {
+        if (strcmp(k_dev_entries[i], name) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void append_hex_byte(std::string& out, uint8_t value)
+{
+    static const char kHex[] = "0123456789abcdef";
+    out.push_back(kHex[(value >> 4) & 0x0F]);
+    out.push_back(kHex[value & 0x0F]);
+}
+
+static void append_hex_sample(std::string& out, size_t bytes, bool randomize)
+{
+    out.reserve(out.size() + bytes * 2 + 1);
+    for (size_t i = 0; i < bytes; i++) {
+        uint8_t value = 0;
+        if (randomize) {
+            value = static_cast<uint8_t>(esp_random() & 0xFF);
+        }
+        append_hex_byte(out, value);
+    }
+    out.push_back('\n');
 }
 
 // construit un chemin canonique absolu à partir de cwd + path
@@ -260,6 +308,7 @@ bool fs_cd(const char* path)
     // répertoires virtuels valides
     if (path_eq(canon, "/") ||
         path_eq(canon, "/bin") ||
+        path_eq(canon, "/dev") ||
         path_eq(canon, "/media") ||
         path_eq(canon, "/media/0")) {
 
@@ -334,7 +383,7 @@ static const char* k_bin_names[] = {
     "vi", "nano", "touch", "cat",
     "view", "slideshow", "play", "led",
     "lx", "lxprofile", "more", "less", "find", "tee",
-    "clear", "reset", "battery", "shutdown", "brightness",
+    "clear", "reset", "battery", "free", "echo", "shutdown", "reboot", "brightness",
     "man",
     "uptime"
 };
@@ -568,9 +617,11 @@ bool fs_list(const char* path, const char* opts)
         if (opt_long) {
             const char* date = "1970-01-01";
             print_long_entry(true, true, false, false, true, false, 0, date, "bin");
+            print_long_entry(true, true, false, false, true, false, 0, date, "dev");
             print_long_entry(true, true, false, false, true, false, 0, date, "media");
         } else {
             term_puts("bin\n");
+            term_puts("dev\n");
             term_puts("media\n");
         }
         return true;
@@ -578,6 +629,22 @@ bool fs_list(const char* path, const char* opts)
 
     if (path_eq(canon, "/bin")) {
         list_bin(opts);
+        return true;
+    }
+
+    if (path_eq(canon, "/dev")) {
+        if (opt_long) {
+            const char* date = "1970-01-01";
+            for (size_t i = 0; i < sizeof(k_dev_entries) / sizeof(k_dev_entries[0]); i++) {
+                print_long_entry(false, true, false, false, true, false, 0,
+                    date, k_dev_entries[i]);
+            }
+        } else {
+            for (size_t i = 0; i < sizeof(k_dev_entries) / sizeof(k_dev_entries[0]); i++) {
+                term_puts(k_dev_entries[i]);
+                term_putc('\n');
+            }
+        }
         return true;
     }
 
@@ -631,11 +698,21 @@ bool fs_stat(const char* path, FsStat& out)
     fs_norm(cwd, path, canon, sizeof(canon));
 
     if (path_eq(canon, "/") || path_eq(canon, "/bin") ||
-        path_eq(canon, "/media") || path_eq(canon, "/media/0")) {
+        path_eq(canon, "/dev") || path_eq(canon, "/media") ||
+        path_eq(canon, "/media/0")) {
         if (path_eq(canon, "/media/0") && !sd_is_mounted()) {
             return false;
         }
         out.is_dir = true;
+        return true;
+    }
+
+    if (strncmp(canon, "/dev/", 5) == 0) {
+        const char* name = canon + 5;
+        if (!dev_entry_has(name)) {
+            return false;
+        }
+        out.is_file = true;
         return true;
     }
 
@@ -673,6 +750,47 @@ bool fs_stat(const char* path, FsStat& out)
 
 bool fs_write_file(const char* path, const unsigned char* data, size_t len)
 {
+    char canon[128];
+    fs_norm(cwd, path, canon, sizeof(canon));
+    if (path_eq(canon, "/dev/console")) {
+        if (len > 0) {
+            Serial.write(data, len);
+            Serial.flush();
+        }
+        return true;
+    }
+    if (path_eq(canon, "/dev/stdout")) {
+        if (len > 0) {
+            term_write_bytes(reinterpret_cast<const char*>(data), len);
+        }
+        return true;
+    }
+    if (path_eq(canon, "/dev/stderr")) {
+        if (len > 0) {
+            term_write_bytes_error(reinterpret_cast<const char*>(data), len);
+        }
+        return true;
+    }
+    if (path_eq(canon, "/dev/tty")) {
+        if (len > 0) {
+            term_write_bytes(reinterpret_cast<const char*>(data), len);
+        }
+        return true;
+    }
+    if (path_eq(canon, "/dev/kmsg")) {
+        if (len > 0) {
+            Serial.write(data, len);
+            Serial.flush();
+        }
+        return true;
+    }
+    if (path_eq(canon, "/dev/full")) {
+        return false;
+    }
+    if (path_eq(canon, "/dev/null")) {
+        return true;
+    }
+
     char real[128];
     if (!fs_resolve_media_path(path, real, sizeof(real))) {
         return false;
@@ -692,6 +810,47 @@ bool fs_write_file(const char* path, const unsigned char* data, size_t len)
 
 bool fs_append_file(const char* path, const unsigned char* data, size_t len)
 {
+    char canon[128];
+    fs_norm(cwd, path, canon, sizeof(canon));
+    if (path_eq(canon, "/dev/console")) {
+        if (len > 0) {
+            Serial.write(data, len);
+            Serial.flush();
+        }
+        return true;
+    }
+    if (path_eq(canon, "/dev/stdout")) {
+        if (len > 0) {
+            term_write_bytes(reinterpret_cast<const char*>(data), len);
+        }
+        return true;
+    }
+    if (path_eq(canon, "/dev/stderr")) {
+        if (len > 0) {
+            term_write_bytes_error(reinterpret_cast<const char*>(data), len);
+        }
+        return true;
+    }
+    if (path_eq(canon, "/dev/tty")) {
+        if (len > 0) {
+            term_write_bytes(reinterpret_cast<const char*>(data), len);
+        }
+        return true;
+    }
+    if (path_eq(canon, "/dev/kmsg")) {
+        if (len > 0) {
+            Serial.write(data, len);
+            Serial.flush();
+        }
+        return true;
+    }
+    if (path_eq(canon, "/dev/full")) {
+        return false;
+    }
+    if (path_eq(canon, "/dev/null")) {
+        return true;
+    }
+
     char real[128];
     if (!fs_resolve_media_path(path, real, sizeof(real))) {
         return false;
@@ -719,12 +878,20 @@ bool fs_list_entries(const char* path, std::vector<FsEntry>& out,
 
     if (path_eq(canon, "/")) {
         out.push_back({ "bin", true });
+        out.push_back({ "dev", true });
         out.push_back({ "media", true });
         return true;
     }
 
     if (path_eq(canon, "/bin")) {
         list_bin_entries(out, include_hidden);
+        return true;
+    }
+
+    if (path_eq(canon, "/dev")) {
+        for (size_t i = 0; i < sizeof(k_dev_entries) / sizeof(k_dev_entries[0]); i++) {
+            out.push_back({ k_dev_entries[i], false });
+        }
         return true;
     }
 
@@ -858,6 +1025,17 @@ bool fs_read_file(const char* path, std::string& out)
 {
     out.clear();
 
+    char canon[128];
+    fs_norm(cwd, path, canon, sizeof(canon));
+    if (path_eq(canon, "/dev/zero")) {
+        append_hex_sample(out, 128, false);
+        return true;
+    }
+    if (path_eq(canon, "/dev/random") || path_eq(canon, "/dev/urandom")) {
+        append_hex_sample(out, 128, true);
+        return true;
+    }
+
     char real[128];
     if (!fs_resolve_media_path(path, real, sizeof(real))) {
         return false;
@@ -890,6 +1068,9 @@ bool fs_find(const char* path, const char* pattern, bool case_insensitive)
         if (!pattern || match_pattern("bin", pattern, case_insensitive)) {
             term_puts("/bin\n");
         }
+        if (!pattern || match_pattern("dev", pattern, case_insensitive)) {
+            term_puts("/dev\n");
+        }
         if (!pattern || match_pattern("media", pattern, case_insensitive)) {
             term_puts("/media\n");
         }
@@ -913,6 +1094,17 @@ bool fs_find(const char* path, const char* pattern, bool case_insensitive)
             if (!pattern || match_pattern(names[i], pattern, case_insensitive)) {
                 term_puts("/bin/");
                 term_puts(names[i]);
+                term_putc('\n');
+            }
+        }
+        return true;
+    }
+
+    if (path_eq(canon, "/dev")) {
+        for (size_t i = 0; i < sizeof(k_dev_entries) / sizeof(k_dev_entries[0]); i++) {
+            if (!pattern || match_pattern(k_dev_entries[i], pattern, case_insensitive)) {
+                term_puts("/dev/");
+                term_puts(k_dev_entries[i]);
                 term_putc('\n');
             }
         }
